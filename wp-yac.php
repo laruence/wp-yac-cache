@@ -573,8 +573,8 @@ function wp_yac_render_admin_page() {
 	$info = wp_yac_storage_info();
 
 	// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only notice display; the actions that set it were nonce-verified
-	if ( isset( $_GET['wp_yac_notice'] ) ) {
-		$wp_yac_notice_key = sanitize_key( wp_unslash( $_GET['wp_yac_notice'] ) );
+	$wp_yac_notice_key = isset( $_GET['wp_yac_notice'] ) ? sanitize_key( wp_unslash( $_GET['wp_yac_notice'] ) ) : '';
+	if ( $wp_yac_notice_key ) {
 		$notices = array(
 			'deployed'      => array( 'success', 'Drop-in deployed.' ),
 			'deploy_failed' => array( 'error', 'Deployment failed: a foreign object-cache.php exists or wp-content is not writable.' ),
