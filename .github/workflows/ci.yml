@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.2', '7.4', '8.0', '8.1', '8.2', '8.3', '8.4', '8.5']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Syntax check
+        run: |
+          php -l wp-yac.php
+          php -l object-cache.php
+
+      - name: Drop-in smoke test (runtime-only fallback)
+        run: php -n tests/smoke.php
+
+  test-yac:
+    # exercises the shared-memory path: builds the yac extension on the fly,
+    # so the job tracks upstream laruence/yac instead of a pinned commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: yac
+          coverage: none
+
+      - name: Syntax check
+        run: |
+          php -l wp-yac.php
+          php -l object-cache.php
+
+      - name: Drop-in smoke test (shared memory)
+        run: php -d yac.enable_cli=1 tests/smoke.php
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: Build release zip
+        run: bash scripts/build-release.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wp-yac-object-cache
+          path: dist/wp-yac-cache.zip
