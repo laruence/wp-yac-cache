@@ -149,10 +149,6 @@ php tests/shell.php                       # plugin shell (deploy/status)
 php tests/render.php                      # admin page render (charts/advice)
 ```
 
-## Author
-
-Xinchen Hui (Laruence) — https://www.laruence.com
-
 ## License
 
 GPLv2 or later.
