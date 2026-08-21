@@ -1,8 +1,15 @@
 name: Release
 
 on:
-  push:
-    tags: ['[0-9]*']
+  # Fires when a release is created/published on GitHub (web UI or API),
+  # so the flow is: push commits -> create the release -> zip gets uploaded.
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and upload'
+        required: true
 
 jobs:
   release:
@@ -10,7 +17,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Build from the tag the release points at, not the default branch
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -22,5 +32,6 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.event.release.tag_name }}
           files: dist/wp-yac-cache.zip
           fail_on_unmatched_files: true
