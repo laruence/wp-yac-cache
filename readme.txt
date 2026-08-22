@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.1.1
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -102,7 +102,7 @@ Yac cannot delete entries by prefix, so a group flush clears the request-level c
 
 == Changelog ==
 
-= 1.1.1 =
+= 1.1.0 =
 * Dashboard rebuilt around a cache-health verdict: hit-rate ring, cause-attributed metric bars, keys-by-group pie, largest entries by content length, configuration reference and runtime diagnostics.
 * Key format rework: `<prefix>:<group>:<key>` with no per-blog prefix (default prefix `wp`); over-long keys keep the group verbatim and hash only the key part; `switch_to_blog()` no longer re-namespaces keys.
 * `WP_YAC_SKIP_EMPTY` (on by default): empty `get_page_by_path:` negatives (bot 404 probes) stay request-local instead of filling slots.

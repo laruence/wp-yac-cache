@@ -40,7 +40,7 @@ if ( ! defined( 'WP_YAC_KEY_PREFIX' ) ) {
 }
 
 if ( ! defined( 'WP_YAC_DROPIN_VERSION' ) ) {
-	define( 'WP_YAC_DROPIN_VERSION', '1.1.1' );
+	define( 'WP_YAC_DROPIN_VERSION', '1.1.0' );
 }
 
 if ( ! defined( 'WP_YAC_SKIP_EMPTY' ) ) {
