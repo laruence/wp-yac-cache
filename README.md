@@ -42,16 +42,25 @@ Best fit is single-node (or few-node) WordPress installs.
 
 ![Yac dashboard](docs/assets/dashboard.png)
 
+![Shared memory contents](docs/assets/dashboard-contents.png)
+
+The first panel is the verdict: hit-rate ring, Healthy / Attention /
+Critical, and cause-attributed metric bars — all green when healthy,
+only the causing metrics take the verdict color. The second shows what
+the shared memory actually holds: keys-by-group pie, occupancy stats and
+the largest entries by content length; every key clicks through to the
+entry inspector (deserialized value, expiry, last access on newer yac
+builds, padded size, delete).
+
 Tools → Yac Object Cache, top to bottom:
 
 - **Status** — one green bar when everything is wired (`Active … round
   trip X ms`), or the concrete problem list otherwise
 - **Cache health** — hit-rate ring with a Healthy / Attention / Critical
   verdict, plus per-metric bars (keys, values, hits, misses, kicks,
-  recycles); all bars green when healthy, only the causing metrics take
-  the verdict color, and the advice names the `php.ini` knob to raise
+  recycles); the advice names the `php.ini` knob to raise
 - **Shared memory contents** — keys-by-group pie, occupancy stats and
-  the largest entries by content length
+  largest entries, pictured above
 - **Configuration** — the wp-config.php knobs with current values
 - **Diagnostics** — versions, PHP/Yac runtime facts, key budget
 - **Actions** — flush / deploy / update / remove the drop-in
