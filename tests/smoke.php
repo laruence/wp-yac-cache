@@ -204,16 +204,39 @@ if ( $yac_on ) {
 }
 
 // ---------------------------------------------------------------------------
-// switch_to_blog changes key namespace (multisite semantics; on a single
-// site the prefix stays $table_prefix by design, like the classic drop-in)
+// WP_YAC_SKIP_EMPTY: empty values of unbounded-URL-derived keys stay
+// request-local; stable per-entity negative caches keep being shared
+// ---------------------------------------------------------------------------
+$long_key = 'overlong-' . str_repeat( 'x', 60 );
+$junk_key = 'get_page_by_path:' . md5( '/some/crawler/path' );
+wp_cache_set( 'short-empty', array() );
+wp_cache_set( $long_key, array() );
+wp_cache_set( $junk_key, array() );
+check( 'junk-path empty served within the request', wp_cache_get( $junk_key ) === array() );
+if ( $yac_on ) {
+	$GLOBALS['wp_object_cache'] = new WP_Object_Cache();
+	check( 'short-key empty array persists cross-request', wp_cache_get( 'short-empty' ) === array() );
+	check( 'over-long entity-key empty array persists cross-request', wp_cache_get( $long_key ) === array() );
+	check( 'junk-path empty does NOT persist cross-request', wp_cache_get( $junk_key ) === false );
+
+	wp_cache_set( $junk_key, 'non-empty' );
+	$GLOBALS['wp_object_cache'] = new WP_Object_Cache();
+	check( 'junk-path non-empty value persists cross-request', wp_cache_get( $junk_key ) === 'non-empty' );
+} else {
+	echo "  skip skip-empty persistence assertions (Yac not active)\n";
+}
+
+// ---------------------------------------------------------------------------
+// switch_to_blog: keys carry no blog prefix anymore; blogs intentionally
+// share the namespace (separate installs/prefixes when they must not)
 // ---------------------------------------------------------------------------
 $GLOBALS['wp_yac_test_multisite'] = true;
 wp_cache_switch_to_blog( 1 );
 wp_cache_set( 'blogkey', 'blog1' );
 wp_cache_switch_to_blog( 2 );
-check( 'after switch_to_blog key is namespaced away', wp_cache_get( 'blogkey' ) === false );
+check( 'blogs share the namespace by design (no per-blog prefix)', wp_cache_get( 'blogkey' ) === 'blog1' );
 wp_cache_switch_to_blog( 1 );
-check( 'switching back restores access', wp_cache_get( 'blogkey' ) === 'blog1' );
+check( 'switching back keeps access', wp_cache_get( 'blogkey' ) === 'blog1' );
 $GLOBALS['wp_yac_test_multisite'] = false;
 
 // ---------------------------------------------------------------------------
@@ -266,7 +289,7 @@ $storage_prefix = function ( $instance = null ) {
 	return $r->getValue( $instance );
 };
 
-check( 'storage prefix starts with default wp_', 0 === strpos( $storage_prefix(), 'wp_' ) );
+check( 'storage prefix starts with default wp', 0 === strpos( $storage_prefix(), 'wp' ) );
 
 /* constants can't be redefined, so each prefix gets its own subprocess */
 $prefix_probe = function ( $prefix ) {

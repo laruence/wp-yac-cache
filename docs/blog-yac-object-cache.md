@@ -89,7 +89,7 @@ wp plugin install https://github.com/laruence/wordpress-yac-cache/releases/lates
 
 ```php
 define( 'WP_CACHE', true );
-define( 'WP_CACHE_KEY_SALT', '一段长随机字符串,每个站点唯一' );
+define( 'WP_YAC_KEY_PREFIX', 'ab_' ); // 共享 PHP 池时,每个站点用不同前缀(键不再带 blog 前缀,多站点博客共享命名空间)
 ```
 
 可选调优(php.ini):

@@ -19,14 +19,21 @@ Best fit is single-node (or few-node) WordPress installs.
 - **Self-deploying drop-in** — activation copies `object-cache.php` to
   `wp-content/`; the admin page tracks drop-in version and updates it
 - **Readable storage keys** — keys are stored verbatim while they fit Yac's
-  48-byte limit (salt carried by the instance prefix); only oversized keys
-  are hashed (crc32b). Configurable prefix via `WP_YAC_KEY_PREFIX`
+  48-byte limit (the per-site prefix carried by the instance prefix);
+  over-long keys keep
+  the group verbatim and hash (crc32b) only the key part, so dumps and the
+  dashboard pie chart stay attributable by group. Configurable prefix via
+  `WP_YAC_KEY_PREFIX`
+- **Pollution guard** — `WP_YAC_SKIP_EMPTY` (on by default, the single
+  filter) keeps empty `get_page_by_path:` negatives (bot 404 probes,
+  never re-read) request-local
 - **False-safe** — values are stored as `array('v' => $data)` to resolve
   Yac's miss-vs-stored-false ambiguity
 - **Admin dashboard** — live stats, health advice and self-test, see
   [Dashboard](#dashboard)
-- **Multisite aware** — site-scoped and global groups keyed separately,
-  `switch_to_blog()` supported
+- **Multisite aware** — keys carry no per-blog prefix; isolation between
+  installs sharing one PHP pool lives in `WP_YAC_KEY_PREFIX`; multisite
+  blogs share one namespace (run separate installs when they must not)
 - **Graceful degradation** — without the Yac extension the drop-in falls back
   to a per-request cache and WordPress keeps working
 - **WP-CLI commands** — `wp yac status`, `wp yac flush`
@@ -35,10 +42,19 @@ Best fit is single-node (or few-node) WordPress installs.
 
 ![Yac dashboard](docs/assets/dashboard.png)
 
-Tools → Yac Object Cache: key-slot usage, hit rate, counters, value-memory
-health with capacity advice, a self-test, and a snapshot of the largest
-entries. When a pool is undersized, the health panel points at the `php.ini`
-knob to raise — for the values pool it even names a concrete size.
+Tools → Yac Object Cache, top to bottom:
+
+- **Status** — one green bar when everything is wired (`Active … round
+  trip X ms`), or the concrete problem list otherwise
+- **Cache health** — hit-rate ring with a Healthy / Attention / Critical
+  verdict, plus per-metric bars (keys, values, hits, misses, kicks,
+  recycles); all bars green when healthy, only the causing metrics take
+  the verdict color, and the advice names the `php.ini` knob to raise
+- **Shared memory contents** — keys-by-group pie, occupancy stats and
+  the largest entries by content length
+- **Configuration** — the wp-config.php knobs with current values
+- **Diagnostics** — versions, PHP/Yac runtime facts, key budget
+- **Actions** — flush / deploy / update / remove the drop-in
 
 ## Requirements
 
@@ -99,8 +115,12 @@ In `wp-config.php`, above the "That's all, stop editing!" line:
 
 ```php
 define( 'WP_CACHE', true );
-define( 'WP_CACHE_KEY_SALT', 'a long random string, unique per install' );
+define( 'WP_YAC_KEY_PREFIX', 'ab_' ); // unique per install when sites share one PHP pool
 ```
+
+Keys carry no per-blog prefix: with a multisite install all blogs share
+one cache namespace. When sites sharing one PHP pool must not see each
+other's entries, give each its own `WP_YAC_KEY_PREFIX`.
 
 Check **Tools → Yac Object Cache** for status, stats and flush actions.
 
@@ -115,8 +135,18 @@ yac.values_memory_size = 64M   ; raise for large sites (alloptions!)
 
 ```php
 ; wp-config.php escape hatches
-define( 'WP_YAC_DISABLE', true );     // force runtime-only mode
-define( 'WP_YAC_KEY_PREFIX', 'wp_' ); // cosmetic key prefix, 0-6 chars, shorter is better
+define( 'WP_YAC_DISABLE', true );    // force runtime-only mode
+define( 'WP_YAC_KEY_PREFIX', 'wp' ); // key prefix, 0-6 chars; per-site isolation when sharing a PHP pool
+
+// The single pollution filter: bots probe unbounded one-off URLs and
+// each 404 path mints a get_page_by_path:<md5> key whose value is an
+// empty negative result — never re-read, yet each occupies a slot.
+// With the flag on, those empty values stay request-local. Stable
+// per-entity negative caches (comment children, term relationships,
+// adjacent posts...) ARE re-read on every view and keep being shared;
+// when their working set outgrows the slot table, the remedy is a
+// bigger yac.keys_memory_size (the dashboard says so), not skipping.
+define( 'WP_YAC_SKIP_EMPTY', true );
 ```
 
 ## Benchmarks

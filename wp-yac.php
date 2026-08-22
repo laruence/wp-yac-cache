@@ -3,7 +3,7 @@
  * Plugin Name: Yac Object Cache
  * Plugin URI: https://github.com/laruence/wordpress-yac-cache
  * Description: Yac (lock-free shared memory) backed object cache for WordPress. Auto-deploys the object-cache.php drop-in on activation. No external servers: the cache lives in shared memory inherited by PHP-FPM workers.
- * Version: 1.0.0
+ * Version: 1.1.1
  * Requires at least: 5.6
  * Requires PHP: 7.0
  * Author: Xinchen Hui
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WP_YAC_VERSION', '1.0.0' );
+define( 'WP_YAC_VERSION', '1.1.1' );
 define( 'WP_YAC_PLUGIN_FILE', __FILE__ );
 define( 'WP_YAC_DROPIN_SOURCE', __DIR__ . '/object-cache.php' );
 define( 'WP_YAC_DROPIN_DEST', WP_CONTENT_DIR . '/object-cache.php' );
@@ -130,14 +130,13 @@ function wp_yac_dropin_version() {
 }
 
 /* the drop-in's Yac instance prefix: WP_YAC_KEY_PREFIX (0-6 chars,
-   sanitized) + 8 hex chars of the key salt. The drop-in builds the same
-   string from the same wp-config.php constants, so nothing to sync */
+   sanitized) + ':'. The drop-in builds the same string from the same
+   wp-config.php constant, so nothing to sync; it is the only isolation
+   between installs sharing one PHP pool */
 function wp_yac_key_prefix() {
-	$salt = defined( 'WP_CACHE_KEY_SALT' ) ? WP_CACHE_KEY_SALT : 'wp-yac-default-salt';
-	$user = defined( 'WP_YAC_KEY_PREFIX' ) ? WP_YAC_KEY_PREFIX : 'wp_';
+	$user = defined( 'WP_YAC_KEY_PREFIX' ) ? WP_YAC_KEY_PREFIX : 'wp';
 
-	return preg_replace( '/[^A-Za-z0-9_]/', '', substr( (string) $user, 0, 6 ) )
-		. substr( hash( 'crc32b', $salt ), 0, 8 ) . ':';
+	return preg_replace( '/[^A-Za-z0-9_]/', '', substr( (string) $user, 0, 6 ) ) . ':';
 }
 
 /* one round-trip through shared memory (set/get/delete), timed in ms;
@@ -166,7 +165,11 @@ function wp_yac_self_test() {
 
 /* entry-level statistics from Yac::dump() (null when unavailable);
    dump(-1) fetches everything — the default limit is 100 */
-function wp_yac_memory_snapshot( $top = 10 ) {
+function wp_yac_memory_snapshot( $top = 10, $prefix = '' ) {
+	if ( isset( $GLOBALS['wp_yac_test_snapshot'] ) ) {
+		return $GLOBALS['wp_yac_test_snapshot'];
+	}
+
 	if ( ! wp_yac_backend_usable() ) {
 		return null;
 	}
@@ -177,27 +180,76 @@ function wp_yac_memory_snapshot( $top = 10 ) {
 		return null;
 	}
 
-	$total   = count( $entries );
-	$bytes   = 0;
-	$largest = array();
+	$total    = count( $entries );
+	$bytes    = 0;
+	$occupied = 0;
+	$own      = 0;
+	$largest  = array();
+	$groups   = array();
 
+	/* the drop-in stores "<storage_prefix><group>:<key>" */
 	foreach ( $entries as $entry ) {
 		/* v_len is the serialized value length; 'size' is the padded
-		   allocation and would overstate content usage */
-		$size = isset( $entry['v_len'] ) ? (int) $entry['v_len'] : 0;
-		$key  = isset( $entry['key'] ) ? $entry['key'] : '';
+		   allocation Yac actually reserves — the right measure of how
+		   much of the values pool the current entries occupy */
+		$vlen  = isset( $entry['v_len'] ) ? (int) $entry['v_len'] : 0;
+		$alloc = isset( $entry['size'] ) ? (int) $entry['size'] : 0;
+		$key   = isset( $entry['key'] ) ? $entry['key'] : '';
 
-		$bytes    += $size;
-		$largest[] = array( $size, $key );
+		$bytes    += $vlen;
+		$occupied += $alloc;
+		$largest[] = array( $vlen, $alloc, $key );
+
+		if ( '' !== $prefix && 0 === strpos( $key, $prefix ) ) {
+			$own++;
+
+			$logical = substr( $key, strlen( $prefix ) );
+			if ( 8 === strlen( $logical ) && ctype_xdigit( $logical ) ) {
+				$group = 'hashed (long keys)';
+			} else {
+			$colon = strpos( $logical, ':' );
+				$group = ( false === $colon ) ? $logical : substr( $logical, 0, $colon );
+				if ( '' === $group ) {
+					$group = 'default';
+				}
+			}
+		} else {
+			$group = 'other Yac users';
+		}
+
+		if ( ! isset( $groups[ $group ] ) ) {
+			$groups[ $group ] = array( 0, 0 );
+		}
+		$groups[ $group ][0]++;
+		$groups[ $group ][1] += $alloc;
+	}
+
+	$group_list = array();
+	foreach ( $groups as $label => $agg ) {
+		$group_list[] = array( 'label' => $label, 'n' => $agg[0], 'bytes' => $agg[1] );
+	}
+	usort( $group_list, function ( $a, $b ) {
+		return $b['n'] - $a['n'];
+	} );
+	if ( count( $group_list ) > 7 ) {
+		$other = array( 'label' => 'other', 'n' => 0, 'bytes' => 0 );
+		foreach ( array_splice( $group_list, 6 ) as $g ) {
+			$other['n']     += $g['n'];
+			$other['bytes'] += $g['bytes'];
+		}
+		$group_list[] = $other;
 	}
 
 	rsort( $largest );
 
 	return array(
-		'entries' => $total,
-		'bytes'   => $bytes,
-		'average' => $total > 0 ? $bytes / $total : 0,
-		'largest' => array_slice( $largest, 0, $top ),
+		'entries'  => $total,
+		'bytes'    => $bytes,
+		'occupied' => $occupied,
+		'own'      => $own,
+		'average'  => $total > 0 ? $occupied / $total : 0,
+		'largest'  => array_slice( $largest, 0, $top ),
+		'groups'   => $group_list,
 	);
 }
 
@@ -252,17 +304,6 @@ function wp_yac_status() {
 		) );
 	} else {
 		$status[] = array( 'extension', 'err', 'Yac extension not loaded. Install it (pecl install yac) or the cache degrades to per-request memory.' );
-	}
-
-	$salt = defined( 'WP_CACHE_KEY_SALT' ) ? constant( 'WP_CACHE_KEY_SALT' ) : '';
-
-	if ( '' === $salt || 'wp-yac-default-salt' === $salt ) {
-		$status[] = array( 'salt', 'warn', sprintf(
-			'Using the default key salt. Set a unique %s in wp-config.php, especially when multiple installs share this PHP pool.',
-			"<code>WP_CACHE_KEY_SALT</code>"
-		) );
-	} else {
-		$status[] = array( 'salt', 'ok', 'WP_CACHE_KEY_SALT is set.' );
 	}
 
 	if ( defined( 'WP_YAC_KEY_PREFIX' ) && strlen( WP_YAC_KEY_PREFIX ) > 6 ) {
@@ -338,27 +379,148 @@ function wp_yac_format_bytes( $bytes ) {
 	return round( $bytes, $i ? 2 : 0 ) . ' ' . $units[ $i ];
 }
 
-/* SVG donut chart; pure markup, no JS, no CDN dependency */
-function wp_yac_donut( $used, $total, $color ) {
-	$ratio = $total > 0 ? min( 1, $used / $total ) : 0;
-	$pct   = round( $ratio * 100, 1 );
-	$r     = 54;
+/* health verdict from keys/values fullness + hit rate. 'causes' names
+   the bars that take the verdict color instead of green; when healthy
+   every bar is green */
+function wp_yac_health( $info, $snapshot ) {
+	$keys_total = (int) $info['slots_size'];
+	$keys_used  = (int) $info['slots_used'];
+	$keys_pct   = $keys_total > 0 ? $keys_used / $keys_total * 100 : 0;
+
+	$values_total = (int) $info['values_memory_size'];
+	$occupied     = $snapshot ? (float) $snapshot['occupied'] : 0;
+	$vals_pct     = $values_total > 0 ? $occupied / $values_total * 100 : 0;
+
+	/* yac builds with window counters report the hit rate of the last
+	   completed ~20K-lookup window; older builds fall back to the
+	   since-FPM-start aggregate */
+	if ( isset( $info['win_rate'], $info['win_reset_tv'] ) && (int) $info['win_reset_tv'] > time() - 3600 ) {
+		$rate = (float) $info['win_rate'] / 10;
+	} else {
+		$lookups = (int) $info['hits'] + (int) $info['miss'];
+		$rate    = $lookups > 0 ? (int) $info['hits'] / $lookups * 100 : 0;
+	}
+
+	$verdict = 'green';
+	$causes  = array();
+	$advice  = '';
+
+	$kicks  = (int) $info['kicks'];
+	$misses = (int) $info['miss'];
+
+	/* every successful insert either took a free slot (slots_used) or
+	   kicked one, so inserts ~= slots_used + kicks; the observed kick
+	   share vs the uniform-hashing expectation A^4/5 exposes a bad
+	   placement; kicks/misses attributes misses to evictions */
+	$inserts     = $keys_used + $kicks;
+	$kick_obs    = $inserts > 0 ? $kicks / $inserts * 100 : 0;
+	$kick_exp    = pow( min( 1, $keys_pct / 100 ), 4 ) / 5 * 100;
+	$foreign_pct = ( $snapshot && $snapshot['entries'] > 0 )
+		? ( $snapshot['entries'] - $snapshot['own'] ) / $snapshot['entries'] * 100
+		: 0;
+
+	if ( $keys_pct >= 90 ) {
+		/* slots (nearly) full: circular eviction kicks in, so health is
+		   whatever the hit rate says */
+		if ( $rate < 70 ) {
+			$verdict = 'red';
+			$causes  = array( 'keys', 'kicks', 'misses' );
+			$advice  = 'keys-strong';
+		} elseif ( $rate < 90 ) {
+			$verdict = 'yellow';
+			$causes  = array( 'keys', 'kicks', 'misses' );
+			$advice  = 'keys';
+		}
+	} elseif ( $vals_pct >= 90 ) {
+		/* slots not full but the working set does not fit the values
+		   pool: entries get ring-overwritten before re-read */
+		$verdict = 'yellow';
+		$causes  = array( 'values', 'recycles', 'misses' );
+		$advice  = 'values';
+	} elseif ( $rate < 90 && $kick_obs >= max( 3 * $kick_exp, 5 ) ) {
+		/* far more kicks than uniform hashing predicts at this
+		   occupancy: the placement roll is bad, or the table is too
+		   small for the churn. Requires observed harm — on long
+		   uptimes kicks creep up harmlessly (slots never free), and
+		   that must stay green */
+		$verdict = 'yellow';
+		$causes  = array( 'keys', 'kicks' );
+		$advice  = 'distribution';
+	} elseif ( $rate < 90 && $misses > 0 && $kicks / $misses >= 1 / 3 ) {
+		/* slot pressure arrives early: a third+ of the misses are
+		   eviction-driven although the table is not even full */
+		$verdict = 'yellow';
+		$causes  = array( 'keys', 'kicks', 'misses' );
+		$advice  = 'keys-early';
+	} elseif ( $foreign_pct > 50 ) {
+		/* our working set is small; the occupancy belongs to other Yac
+		   users sharing this machine's pool */
+		$verdict = 'yellow';
+		$causes  = array( 'keys' );
+		$advice  = 'foreign';
+	}
+
+	return array(
+		'verdict'     => $verdict,
+		'rate'        => $rate,
+		'keys_pct'    => $keys_pct,
+		'vals_pct'    => $vals_pct,
+		'kick_obs'    => $kick_obs,
+		'kick_exp'    => $kick_exp,
+		'foreign_pct' => $foreign_pct,
+		'causes'      => $causes,
+		'advice'      => $advice,
+	);
+}
+
+/* SVG pie from [ label, value, color ] slices; circle-stroke trick:
+   half-radius circle with full-radius stroke width */
+function wp_yac_pie( $slices ) {
+	$total = 0;
+	foreach ( $slices as $s ) {
+		$total += $s[1];
+	}
+	if ( $total <= 0 ) {
+		return '';
+	}
+
+	$r      = 35;
+	$circ   = 2 * M_PI * $r;
+	$offset = 0;
+	$svg    = '<svg class="wp-yac-pie" viewBox="0 0 140 140" role="img">';
+
+	foreach ( $slices as $s ) {
+		$dash    = $s[1] / $total * $circ;
+		$svg    .= sprintf(
+			'<circle cx="70" cy="70" r="%1$d" stroke="%2$s" stroke-width="70" fill="none" stroke-dasharray="%3$s %4$s" stroke-dashoffset="%5$s" transform="rotate(-90 70 70)"/>',
+			$r,
+			esc_attr( $s[2] ),
+			esc_attr( round( $dash, 2 ) ),
+			esc_attr( round( $circ, 2 ) ),
+			esc_attr( round( -$offset, 2 ) )
+		);
+		$offset += $dash;
+	}
+
+	return $svg . '</svg>';
+}
+function wp_yac_health_donut( $pct, $color ) {
+	$ratio = max( 0, min( 1, $pct / 100 ) );
+	$r     = 80;
 	$circ  = 2 * M_PI * $r;
-	$dash  = $circ * $ratio;
 
 	return sprintf(
-		'<svg class="wp-yac-donut" viewBox="0 0 140 140" role="img" aria-label="%1$s%%">'
-		. '<circle class="wp-yac-donut-track" cx="70" cy="70" r="%2$d"/>'
-		. '<circle class="wp-yac-donut-fill" cx="70" cy="70" r="%2$d" stroke="%3$s" stroke-dasharray="%4$s %5$s" transform="rotate(-90 70 70)"/>'
-		. '<text class="wp-yac-donut-pct" x="70" y="66">%1$s%%</text>'
-		. '<text class="wp-yac-donut-sub" x="70" y="86">%6$s</text>'
+		'<svg class="wp-yac-health-donut" viewBox="0 0 200 200" role="img" aria-label="%1$s%%">'
+		. '<circle class="wp-yac-donut-track" cx="100" cy="100" r="%2$d"/>'
+		. '<circle class="wp-yac-donut-fill" cx="100" cy="100" r="%2$d" stroke="%3$s" stroke-dasharray="%4$s %5$s" transform="rotate(-90 100 100)"/>'
+		. '<text class="wp-yac-donut-pct" x="100" y="98">%1$s%%</text>'
+		. '<text class="wp-yac-donut-sub" x="100" y="122">hit rate</text>'
 		. '</svg>',
-		esc_attr( $pct ),
+		esc_attr( round( $pct, 1 ) ),
 		$r,
 		esc_attr( $color ),
-		esc_attr( round( $dash, 2 ) ),
-		esc_attr( round( $circ, 2 ) ),
-		esc_html( number_format_i18n( $used ) . ' / ' . number_format_i18n( $total ) )
+		esc_attr( round( $circ * $ratio, 2 ) ),
+		esc_attr( round( $circ, 2 ) )
 	);
 }
 
@@ -372,12 +534,6 @@ function wp_yac_config_rows() {
 			'loads the object-cache.php drop-in',
 		),
 		array(
-			"define( 'WP_CACHE_KEY_SALT', '…' )",
-			( defined( 'WP_CACHE_KEY_SALT' ) && 'wp-yac-default-salt' !== constant( 'WP_CACHE_KEY_SALT' ) ) ? 'set' : 'default — should be changed',
-			'wp-config.php',
-			'unique prefix, required when installs share one PHP pool',
-		),
-		array(
 			"define( 'WP_YAC_KEY_PREFIX', '…' )",
 			sprintf(
 				'%s%s',
@@ -385,25 +541,13 @@ function wp_yac_config_rows() {
 				defined( 'WP_YAC_KEY_PREFIX' ) ? '' : ' (' . 'default' . ')'
 			),
 			'wp-config.php',
-			'cosmetic prefix of storage keys; 0-6 chars, shorter is better — edit wp-config.php to change it',
+			'storage key prefix, 0-6 chars; the only isolation between installs sharing one PHP pool — use a different one per site; multisite blogs share it',
 		),
 		array(
-			'yac.enable',
-			ini_get( 'yac.enable' ) ? '1' : '0',
-			'php.ini',
-			'master switch of the extension',
-		),
-		array(
-			'yac.keys_memory_size',
-			ini_get( 'yac.keys_memory_size' ),
-			'php.ini',
-			'slot table size (~32K slots per 4M)',
-		),
-		array(
-			'yac.values_memory_size',
-			ini_get( 'yac.values_memory_size' ),
-			'php.ini',
-			'raise when recycles are reported',
+			"define( 'WP_YAC_SKIP_EMPTY', false )",
+			defined( 'WP_YAC_SKIP_EMPTY' ) && ! WP_YAC_SKIP_EMPTY ? 'disabled' : 'enabled (default)',
+			'wp-config.php',
+			'the single pollution filter: empty get_page_by_path negatives (bot 404 probes, never re-read) stay request-local',
 		),
 		array(
 			"define( 'WP_YAC_DISABLE', true )",
@@ -591,29 +735,15 @@ function wp_yac_render_admin_page() {
 	?>
 	<style>
 		.wp-yac-wrap { max-width: 1100px; margin-top: 12px; }
-		.wp-yac-cards { display: flex; gap: 14px; flex-wrap: wrap; margin: 16px 0; }
-		.wp-yac-card { flex: 1 1 150px; background: #fff; border: 1px solid #dcdcde; border-radius: 8px; padding: 14px 16px; box-shadow: 0 1px 1px rgba(0, 0, 0, .04); }
-		.wp-yac-card-num { font-size: 24px; font-weight: 600; line-height: 1.2; color: #1d2327; }
-		.wp-yac-card-label { font-size: 12px; color: #646970; margin-top: 2px; }
 		.wp-yac-grid { display: flex; gap: 14px; flex-wrap: wrap; }
 		.wp-yac-panel { background: #fff; border: 1px solid #dcdcde; border-radius: 8px; padding: 18px 20px; box-shadow: 0 1px 1px rgba(0, 0, 0, .04); }
 		.wp-yac-panel > h2 { margin-top: 0; padding: 0; border: 0; font-size: 15px; }
 		.wp-yac-panel-note { color: #646970; font-size: 12px; margin: -4px 0 12px; }
-		.wp-yac-donut { width: 150px; height: 150px; display: block; margin: 4px auto; }
 		.wp-yac-donut-track { fill: none; stroke: #f0f0f1; stroke-width: 13; }
 		.wp-yac-donut-fill { fill: none; stroke-width: 13; stroke-linecap: round; }
 		.wp-yac-donut-pct { font-size: 22px; font-weight: 600; fill: #1d2327; text-anchor: middle; }
 		.wp-yac-donut-sub { font-size: 9px; fill: #646970; text-anchor: middle; }
-		.wp-yac-legend { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; color: #50575e; }
-		.wp-yac-legend li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-		.wp-yac-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-		.wp-yac-bar-track { background: #f0f0f1; border-radius: 6px; height: 12px; overflow: hidden; margin: 6px 0 14px; }
-		.wp-yac-bar-fill { display: block; height: 100%; border-radius: 6px; }
-		.wp-yac-metric { margin-bottom: 14px; font-size: 13px; }
-		.wp-yac-metric-label { display: flex; justify-content: space-between; margin-bottom: 2px; color: #50575e; }
-		.wp-yac-metric-label strong { color: #1d2327; }
 		.wp-yac-advice { display: flex; gap: 10px; border-radius: 8px; padding: 12px 14px; margin: 14px 0 0; font-size: 13px; line-height: 1.6; }
-		.wp-yac-advice-good { background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; }
 		.wp-yac-advice-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
 		.wp-yac-advice strong { display: block; }
 		.wp-yac-actions { margin-top: 18px; }
@@ -622,14 +752,8 @@ function wp_yac_render_admin_page() {
 		.wp-yac-config-table th { text-align: left; font-size: 12px; color: #646970; padding: 7px 10px; border-bottom: 1px solid #f0f0f1; }
 		.wp-yac-config-table td { border: 0; padding: 7px 10px; font-size: 13px; }
 		.wp-yac-config-table td code { background: #f0f0f1; padding: 2px 6px; border-radius: 3px; font-size: 12px; white-space: nowrap; }
-		.wp-yac-diag { max-width: 640px; }
-		.wp-yac-diag td { border: 0; padding: 7px 10px; font-size: 13px; }
-		.wp-yac-diag td:first-child { color: #646970; width: 160px; }
-		.wp-yac-diag code { background: #f0f0f1; padding: 2px 6px; border-radius: 3px; font-size: 12px; white-space: nowrap; }
-		.wp-yac-selftest { display: inline-flex; align-items: center; gap: 8px; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 14px 0 0; }
-		.wp-yac-selftest-pass { background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; }
-		.wp-yac-selftest-fail { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
-		.wp-yac-op-list { list-style: none; margin: 8px 0 0; padding: 0; max-width: 420px; }
+		.wp-yac-config-table td:nth-child(3) { white-space: nowrap; }
+		.wp-yac-op-list { list-style: none; margin: 8px 0 0; padding: 0; }
 		.wp-yac-op-list li { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #f0f0f1; font-size: 13px; }
 		.wp-yac-op-list span { color: #646970; }
 		.wp-yac-entry-bars { list-style: none; margin: 8px 0 0; padding: 0; }
@@ -638,7 +762,44 @@ function wp_yac_render_admin_page() {
 		.wp-yac-entry-bar-track { flex: 1; background: #f0f0f1; border-radius: 4px; height: 10px; overflow: hidden; }
 		.wp-yac-entry-bar { display: block; height: 100%; background: #72aee6; border-radius: 4px; }
 		.wp-yac-entry-bars strong { width: 76px; text-align: right; flex: none; }
+		.wp-yac-pie-wrap { display: flex; gap: 16px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+		.wp-yac-pie { width: 140px; height: 140px; flex: none; display: block; }
+		.wp-yac-pie-legend { list-style: none; margin: 0; padding: 0; font-size: 12px; flex: 1 1 200px; }
+		.wp-yac-pie-legend li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+		.wp-yac-pie-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+		.wp-yac-pie-legend .g { flex: 1; color: #50575e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.wp-yac-pie-legend strong { text-align: right; }
+		.wp-yac-pie-legend small { color: #646970; font-weight: 400; }
+		.wp-yac-pie-legend .g small { color: #646970; }
+		.wp-yac-contents { display: flex; gap: 28px; flex-wrap: wrap; align-items: stretch; }
+		.wp-yac-contents-left { flex: 0 0 340px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+		.wp-yac-contents-left .wp-yac-pie { width: 240px; height: 240px; }
+		.wp-yac-contents-left .wp-yac-pie-legend { flex: none; width: 100%; max-width: 300px; margin-top: 12px; }
+		.wp-yac-contents-right { flex: 1 1 480px; min-width: 320px; }
+		.wp-yac-entry-bars-lg li { font-size: 13px; padding: 5px 0; }
+		.wp-yac-entry-bars-lg .wp-yac-entry-key { width: 300px; }
+		.wp-yac-entry-bars-lg .wp-yac-entry-bar-track { height: 14px; }
+		.wp-yac-entry-bars-lg strong { width: 90px; }
 		.wp-yac-note { color: #646970; font-size: 12px; margin-top: 8px; }
+		.wp-yac-health { display: flex; gap: 28px; flex-wrap: wrap; align-items: center; }
+		.wp-yac-health-ring { flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; }
+		.wp-yac-health-donut { width: 200px; height: 200px; display: block; }
+		.wp-yac-health-donut .wp-yac-donut-track, .wp-yac-health-donut .wp-yac-donut-fill { stroke-width: 18; }
+		.wp-yac-health-donut .wp-yac-donut-pct { font-size: 34px; }
+		.wp-yac-health-donut .wp-yac-donut-sub { font-size: 13px; }
+		.wp-yac-health-bars { flex: 1 1 420px; }
+		.wp-yac-bars { list-style: none; margin: 0; padding: 0; }
+		.wp-yac-bars li { display: grid; grid-template-columns: 86px 1fr 150px; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; }
+		.wp-yac-bars .lbl { color: #50575e; }
+		.wp-yac-bars .track { background: #f0f0f1; border-radius: 6px; height: 13px; overflow: hidden; }
+		.wp-yac-bars .fill { display: block; height: 100%; border-radius: 6px; }
+		.wp-yac-bars .val { text-align: right; font-weight: 600; color: #1d2327; }
+		.wp-yac-bars .val small { font-weight: 400; color: #646970; }
+		.wp-yac-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 600; margin-top: 12px; }
+		.wp-yac-chip-good { background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; }
+		.wp-yac-chip-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
+		.wp-yac-chip-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
+		.wp-yac-advice-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
 	</style>
 	<div class="wrap wp-yac-wrap">
 		<h1><?php echo esc_html( 'Yac Object Cache' ); ?></h1>
@@ -653,11 +814,22 @@ function wp_yac_render_admin_page() {
 			return 'ok' !== $row[1];
 		} ) );
 		?>
+		<?php $self_test = wp_yac_self_test(); ?>
 		<?php if ( empty( $wp_yac_problems ) ) : ?>
 			<p style="display: inline-flex; align-items: center; gap: 8px; background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 4px 0 0;">
 				<span>✓</span><strong><?php echo esc_html( 'Active' ); ?></strong>
-				<span><?php echo esc_html( '— the object cache is running on Yac shared memory.' ); ?></span>
+				<span>
+					<?php echo esc_html( '— the object cache is running on Yac shared memory' ); ?>
+					<?php if ( null !== $self_test && $self_test['ok'] ) : ?>
+						<span title="<?php echo esc_attr( 'set/get/delete round trip' ); ?>"> &middot; <?php echo esc_html( 'round trip ' . number_format_i18n( $self_test['elapsed'], 3 ) . ' ms' ); ?></span>
+					<?php endif; ?>
+				</span>
 			</p>
+			<?php if ( null !== $self_test && ! $self_test['ok'] ) : ?>
+				<p style="display: inline-flex; align-items: center; gap: 8px; background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 8px 0 0;">
+					<span>✗</span><span><?php echo esc_html( 'Shared-memory round trip failed — a value did not survive set/get. Check the Yac extension configuration.' ); ?></span>
+				</p>
+			<?php endif; ?>
 		<?php else : ?>
 			<table class="widefat striped" style="max-width: 960px">
 				<tbody>
@@ -675,219 +847,137 @@ function wp_yac_render_admin_page() {
 
 		<?php if ( null !== $info ) : ?>
 			<?php
-			$keys_used  = (int) $info['slots_used'];
-			$keys_total = (int) $info['slots_size'];
-			$keys_pct   = $keys_total > 0 ? $keys_used / $keys_total * 100 : 0;
-			$keys_color = $keys_pct < 70 ? '#2271b1' : ( $keys_pct < 90 ? '#dba617' : '#d63638' );
+			$snapshot = wp_yac_memory_snapshot( 10, wp_yac_key_prefix() );
+			$health   = wp_yac_health( $info, $snapshot );
 
+			$health_colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638' );
+			$health_color  = $health_colors[ $health['verdict'] ];
+
+			$keys_used    = (int) $info['slots_used'];
+			$keys_total   = (int) $info['slots_size'];
 			$values_total = (int) $info['values_memory_size'];
-			$hits         = (int) $info['hits'];
-			$misses       = (int) $info['miss'];
-			$lookups      = $hits + $misses;
-			$hit_rate     = $lookups > 0 ? $hits / $lookups * 100 : 0;
-			$recycles     = (int) $info['recycles'];
-			$kicks        = (int) $info['kicks'];
-			$fails        = (int) $info['fails'];
-			$ops_total    = $lookups + $fails;
+			$occupied     = $snapshot ? (float) $snapshot['occupied'] : 0;
 
-			$metric_bars = array(
-				array(
-					'Recycles',
-					'recycle events in values memory',
-					$recycles,
-					max( 1, $ops_total ),
-				),
-				array(
-					'Kicks',
-					'entries evicted from full slots',
-					$kicks,
-					max( 1, $ops_total ),
-				),
-				array(
-					'Fails',
-					'writes that could not be stored',
-					$fails,
-					max( 1, $ops_total ),
-				),
+			$hits      = (int) $info['hits'];
+			$misses    = (int) $info['miss'];
+			$lookups   = $hits + $misses;
+			$recycles  = (int) $info['recycles'];
+			$kicks     = (int) $info['kicks'];
+			$fails     = (int) $info['fails'];
+			$ops_total = $lookups + $fails;
+
+			/* one bar row; color = verdict color when the metric is a
+			   cause of the verdict, green otherwise */
+			$wp_yac_bar = function ( $label, $width, $color, $value_html ) {
+				return '<li><span class="lbl">' . esc_html( $label ) . '</span>'
+					. '<span class="track"><span class="fill" style="width: ' . esc_attr( round( min( 100, max( 0, $width ) ), 1 ) ) . '%; background: ' . esc_attr( $color ) . '"></span></span>'
+					. '<span class="val">' . $value_html . '</span></li>';
+			};
+			$wp_yac_cause = function ( $key ) use ( $health, $health_color ) {
+				return in_array( $key, $health['causes'], true ) ? $health_color : '#00a32a';
+			};
+
+			$wp_yac_bars  = $wp_yac_bar( 'Keys', $health['keys_pct'], $wp_yac_cause( 'keys' ), number_format_i18n( $keys_used ) . ' <small>/ ' . number_format_i18n( $keys_total ) . '</small>' );
+			$wp_yac_bars .= $wp_yac_bar( 'Values', $health['vals_pct'], $wp_yac_cause( 'values' ), esc_html( wp_yac_format_bytes( $occupied ) ) . ' <small>/ ' . esc_html( wp_yac_format_bytes( $values_total ) ) . '</small>' );
+			$wp_yac_bars .= $wp_yac_bar( 'Hits', $lookups > 0 ? $hits / $lookups * 100 : 0, '#00a32a', number_format_i18n( $hits ) );
+			$wp_yac_bars .= $wp_yac_bar( 'Misses', $lookups > 0 ? $misses / $lookups * 100 : 0, $wp_yac_cause( 'misses' ), number_format_i18n( $misses ) );
+			$wp_yac_bars .= $wp_yac_bar( 'Kicks', $kicks / max( 1, $ops_total ) * 100, $wp_yac_cause( 'kicks' ), number_format_i18n( $kicks ) . ( $kicks > 0 && $misses > 0 ? ' <small>(≈' . round( $kicks / $misses * 100 ) . '% of misses)</small>' : '' ) );
+			$wp_yac_bars .= $wp_yac_bar( 'Recycles', $recycles / max( 1, $ops_total ) * 100, $wp_yac_cause( 'recycles' ), number_format_i18n( $recycles ) );
+
+			$wp_yac_chips = array(
+				'green'  => array( 'wp-yac-chip-good', '✓ Healthy' ),
+				'yellow' => array( 'wp-yac-chip-warn', '⚠ Attention' ),
+				'red'    => array( 'wp-yac-chip-err', '✗ Critical' ),
 			);
+			$wp_yac_chip = $wp_yac_chips[ $health['verdict'] ];
 
-			$next_values = $values_total;
-			while ( $next_values < 268435456 ) { /* cap the suggestion at 256M */
-				$next_values *= 2;
-				if ( $recycles * 100 <= $next_values ) {
-					break;
-				}
+			if ( 'green' !== $health['verdict'] ) {
+				$wp_yac_advices = array(
+					'keys'        => array( 'wp-yac-advice-warn', '⚠', sprintf( 'Key slots full and hit rate below 90%% — entries are being kicked before re-read. Raise <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
+					'keys-strong' => array( 'wp-yac-advice-err', '✗', sprintf( 'Key slots full and hit rate below 70%% — the cache is thrashing and requests fall through to the database. Strongly raise <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
+					'values'      => array( 'wp-yac-advice-warn', '⚠', sprintf( 'Keys not full but values full — the current entries occupy more than the values pool and get ring-overwritten before re-read. Raise <code>yac.values_memory_size</code> (currently %s).', esc_html( wp_yac_format_bytes( $values_total ) ) ) ),
+					'distribution'=> array( 'wp-yac-advice-warn', '⚠', sprintf( 'Kicks are %1$.1f%% of inserts vs ≈%2$.1f%% expected under uniform hashing — the placement is unlucky or the slot table too small for the churn. Change <code>WP_YAC_KEY_PREFIX</code> to re-roll the layout (costs one cold start), or raise <code>yac.keys_memory_size</code> (a new mask re-spreads the keys too).', $health['kick_obs'], $health['kick_exp'] ) ),
+					'keys-early'  => array( 'wp-yac-advice-warn', '⚠', sprintf( 'Key slots are not full but the hit rate is under 90%% and a third or more of misses are eviction-driven — slot pressure arrives early. Raise <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
+					'foreign'     => array( 'wp-yac-advice-warn', '⚠', sprintf( 'Only %1$.0f%% of the slotted entries belong to this install — the slot pressure is shared-pool occupancy from other Yac users on this machine. Raise <code>yac.keys_memory_size</code> or run a separate pool.', 100 - $health['foreign_pct'] ) ),
+				);
 			}
 			?>
-			<h2><?php echo esc_html( 'Storage' ); ?></h2>
-			<div class="wp-yac-cards">
-				<div class="wp-yac-card">
-					<div class="wp-yac-card-num"><?php echo esc_html( number_format_i18n( $keys_used ) ); ?> <span style="font-size: 14px; color: #646970">/ <?php echo esc_html( number_format_i18n( $keys_total ) ); ?></span></div>
-					<div class="wp-yac-card-label"><?php echo esc_html( 'Key slots in use' ); ?></div>
-				</div>
-				<div class="wp-yac-card">
-					<div class="wp-yac-card-num"><?php echo esc_html( number_format_i18n( $lookups ) ); ?></div>
-					<div class="wp-yac-card-label"><?php echo esc_html( 'Lookups (hits + misses)' ); ?></div>
-				</div>
-				<div class="wp-yac-card">
-					<div class="wp-yac-card-num"><?php echo esc_html( round( $hit_rate, 1 ) ); ?>%</div>
-					<div class="wp-yac-card-label"><?php echo esc_html( 'Hit rate' ); ?></div>
-				</div>
-				<div class="wp-yac-card">
-					<div class="wp-yac-card-num"><?php echo esc_html( number_format_i18n( $recycles ) ); ?></div>
-					<div class="wp-yac-card-label"><?php echo esc_html( 'Value memory recycles' ); ?></div>
-				</div>
-				<div class="wp-yac-card">
-					<div class="wp-yac-card-num"><?php echo esc_html( wp_yac_format_bytes( $values_total ) ); ?></div>
-					<div class="wp-yac-card-label"><?php echo esc_html( 'Values memory pool' ); ?></div>
-				</div>
-			</div>
-
-			<div class="wp-yac-grid">
-				<div class="wp-yac-panel" style="flex: 1 1 260px">
-					<h2><?php echo esc_html( 'Key slots' ); ?></h2>
-					<p class="wp-yac-panel-note"><?php echo esc_html( sprintf( 'keys_memory_size = %s', ini_get( 'yac.keys_memory_size' ) ) ); ?></p>
-					<?php echo wp_yac_donut( $keys_used, $keys_total, $keys_color ); // phpcs:ignore WordPress.Security.EscapeOutput ?>
-					<ul class="wp-yac-legend">
-						<li><span class="dot" style="background: <?php echo esc_attr( $keys_color ); ?>"></span><?php echo esc_html( sprintf( '%1$s in use (%2$s%%)', number_format_i18n( $keys_used ), number_format_i18n( round( $keys_pct, 1 ) ) ) ); ?></li>
-						<li><span class="dot" style="background: #f0f0f1"></span><?php echo esc_html( sprintf( '%s free', number_format_i18n( $keys_total - $keys_used ) ) ); ?></li>
-					</ul>
-					<p class="wp-yac-note"><?php echo esc_html( 'Note: deleted keys keep their slot until a recycle reclaims it, and expired entries are only detected lazily on read — the counter counts everything still slotted.' ); ?></p>
-					<?php if ( $keys_pct >= 90 ) : ?>
-						<div class="wp-yac-advice wp-yac-advice-warn">
-							<span>⚠</span>
-							<div><?php echo wp_kses_post( sprintf( 'Slot usage above 90%% — entries start getting kicked. Raise <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ); ?></div>
-						</div>
-					<?php endif; ?>
-				</div>
-
-				<div class="wp-yac-panel" style="flex: 1 1 320px">
-					<h2><?php echo esc_html( 'Values memory health' ); ?></h2>
-					<p class="wp-yac-panel-note"><?php echo esc_html( sprintf( 'pool = %s (values_memory_size). Yac does not report the used bytes; health is judged by recycle pressure.', wp_yac_format_bytes( $values_total ) ) ); ?></p>
-
-					<div class="wp-yac-metric">
-						<div class="wp-yac-metric-label"><span><?php echo esc_html( 'Recycles — values memory freed old entries' ); ?></span><strong><?php echo esc_html( number_format_i18n( $recycles ) ); ?></strong></div>
-						<div class="wp-yac-bar-track"><span class="wp-yac-bar-fill" style="width: <?php echo esc_attr( min( 100, $recycles / max( 1, $ops_total ) * 100 ) ); ?>%; background: <?php echo 0 === $recycles ? '#2271b1' : '#d63638'; ?>"></span></div>
+			<h2><?php echo esc_html( 'Cache health' ); ?></h2>
+			<div class="wp-yac-panel">
+				<div class="wp-yac-health">
+					<div class="wp-yac-health-ring">
+						<?php echo wp_yac_health_donut( $health['rate'], $health_color ); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+						<span class="wp-yac-chip <?php echo esc_attr( $wp_yac_chip[0] ); ?>"><?php echo esc_html( $wp_yac_chip[1] ); ?></span>
 					</div>
-					<div class="wp-yac-metric">
-						<div class="wp-yac-metric-label"><span><?php echo esc_html( 'Kicks — keys evicted from full slots' ); ?></span><strong><?php echo esc_html( number_format_i18n( $kicks ) ); ?></strong></div>
-						<div class="wp-yac-bar-track"><span class="wp-yac-bar-fill" style="width: <?php echo esc_attr( min( 100, $kicks / max( 1, $ops_total ) * 100 ) ); ?>%; background: <?php echo 0 === $kicks ? '#2271b1' : '#dba617'; ?>"></span></div>
+					<div class="wp-yac-health-bars">
+						<ul class="wp-yac-bars"><?php echo $wp_yac_bars; // phpcs:ignore WordPress.Security.EscapeOutput -- assembled from escaped parts ?></ul>
+						<p class="wp-yac-note"><?php echo esc_html( 'Values bar = Σ entry.size (padded). All bars green when healthy; only the causing metrics take the verdict color.' ); ?></p>
 					</div>
-					<div class="wp-yac-metric">
-						<div class="wp-yac-metric-label"><span><?php echo esc_html( 'Fails — writes rejected (various causes)' ); ?></span><strong><?php echo esc_html( number_format_i18n( $fails ) ); ?></strong></div>
-						<div class="wp-yac-bar-track"><span class="wp-yac-bar-fill" style="width: <?php echo esc_attr( min( 100, $fails / max( 1, $ops_total ) * 100 ) ); ?>%; background: <?php echo 0 === $fails ? '#2271b1' : '#dba617'; ?>"></span></div>
+				</div>
+				<?php if ( '' !== $health['advice'] ) : ?>
+					<?php $wp_yac_advice = $wp_yac_advices[ $health['advice'] ]; ?>
+					<div class="wp-yac-advice <?php echo esc_attr( $wp_yac_advice[0] ); ?>">
+						<span><?php echo esc_html( $wp_yac_advice[1] ); ?></span>
+						<div><?php echo wp_kses_post( $wp_yac_advice[2] ); ?></div>
 					</div>
-
-					<?php if ( 0 === $recycles ) : ?>
-						<div class="wp-yac-advice wp-yac-advice-good">
-							<span>✓</span>
-							<div><?php echo wp_kses_post( sprintf( '<strong>Healthy.</strong> No value-memory recycles since the FPM master started. The current <code>yac.values_memory_size</code> (%s) is sufficient.', esc_html( wp_yac_format_bytes( $values_total ) ) ) ); ?></div>
-						</div>
-					<?php else : ?>
-						<div class="wp-yac-advice wp-yac-advice-warn">
-							<span>⚠</span>
-							<div><?php echo wp_kses_post( sprintf(
-								'<strong>Memory pressure.</strong> %1$s recycle(s) recorded: values memory ran short and Yac reclaimed old entries. Raise <code>yac.values_memory_size</code> to <code>%2$s</code> (currently %3$s).',
-								esc_html( number_format_i18n( $recycles ) ),
-								esc_html( wp_yac_format_bytes( $next_values ) ),
-								esc_html( wp_yac_format_bytes( $values_total ) )
-							) ); ?></div>
-						</div>
-					<?php endif; ?>
-				</div>
-
-				<div class="wp-yac-panel" style="flex: 1 1 260px">
-					<h2><?php echo esc_html( 'Counters' ); ?></h2>
-					<p class="wp-yac-panel-note"><?php echo esc_html( sprintf( 'segments: %1$d × %2$s · since FPM master start', $info['segment_num'], wp_yac_format_bytes( $info['segment_size'] ) ) ); ?></p>
-					<table class="widefat striped" style="border: 0">
-						<tbody>
-						<?php
-						$counters = array(
-							array( 'Hits', $hits ),
-							array( 'Misses', $misses ),
-							array( 'Hit rate', round( $hit_rate, 1 ) . '%' ),
-							array( 'Fails', $fails ),
-							array( 'Kicks', $kicks ),
-							array( 'Recycles', $recycles ),
-						);
-						foreach ( $counters as $counter ) :
-							?>
-							<tr>
-								<td style="border: 0; padding: 8px 10px"><?php echo esc_html( $counter[0] ); ?></td>
-								<td style="border: 0; padding: 8px 10px; text-align: right; font-weight: 600"><?php echo esc_html( is_int( $counter[1] ) ? number_format_i18n( $counter[1] ) : $counter[1] ); ?></td>
-							</tr>
-						<?php endforeach; ?>
-						</tbody>
-					</table>
-				</div>
-			</div>
-
-		<?php endif; ?>
-
-		<h2><?php echo esc_html( 'Diagnostics' ); ?></h2>
-		<?php $self_test = wp_yac_self_test(); ?>
-		<?php if ( null !== $self_test ) : ?>
-			<div class="wp-yac-selftest <?php echo $self_test['ok'] ? 'wp-yac-selftest-pass' : 'wp-yac-selftest-fail'; ?>">
-				<span><?php echo $self_test['ok'] ? '✓' : '✗'; ?></span>
-				<?php if ( $self_test['ok'] ) : ?>
-					<span><?php echo esc_html( sprintf( 'Shared-memory round trip (set → get → delete) succeeded in %s ms.', number_format_i18n( $self_test['elapsed'], 3 ) ) ); ?></span>
-				<?php else : ?>
-					<span><?php echo esc_html( 'Shared-memory round trip failed: a value did not survive set/get. Check the Yac extension configuration.' ); ?></span>
 				<?php endif; ?>
 			</div>
-		<?php endif; ?>
 
-		<div class="wp-yac-grid">
-			<div class="wp-yac-panel" style="flex: 2 1 500px">
-				<h2><?php echo esc_html( 'Environment' ); ?></h2>
-				<table class="wp-yac-diag">
-					<tbody>
-					<tr>
-						<td><?php echo esc_html( 'Plugin version' ); ?></td>
-						<td><code><?php echo esc_html( WP_YAC_VERSION ); ?></code></td>
-					</tr>
-					<tr>
-						<td><?php echo esc_html( 'Drop-in version' ); ?></td>
-						<td>
-							<?php $dropin_version = wp_yac_dropin_version(); ?>
-							<?php if ( null === $dropin_version ) : ?>
-								<code>—</code>
-							<?php else : ?>
-								<code><?php echo esc_html( $dropin_version ); ?></code>
-								<?php if ( version_compare( WP_YAC_VERSION, $dropin_version, '>' ) ) : ?>
-									<span style="color: #996800"> — <?php echo esc_html( 'outdated, update it from the actions below' ); ?></span>
-								<?php else : ?>
-									<span style="color: #1e7a31"> — <?php echo esc_html( 'up to date' ); ?></span>
-								<?php endif; ?>
+			<h2><?php echo esc_html( 'Shared memory contents' ); ?></h2>
+			<div class="wp-yac-panel">
+				<?php if ( null === $snapshot ) : ?>
+					<p class="wp-yac-note"><?php echo esc_html( 'Requires the Yac extension.' ); ?></p>
+				<?php else : ?>
+					<div class="wp-yac-contents">
+						<div class="wp-yac-contents-left">
+							<?php if ( ! empty( $snapshot['groups'] ) ) : ?>
+								<?php
+								$wp_yac_palette = array( '#2271b1', '#72aee6', '#00a32a', '#dba617', '#d63638', '#787c82', '#996800' );
+								$wp_yac_slices  = array();
+								foreach ( $snapshot['groups'] as $wp_yac_gi => $wp_yac_g ) {
+									$wp_yac_slices[] = array( $wp_yac_g['label'], $wp_yac_g['n'], $wp_yac_g['bytes'], $wp_yac_palette[ $wp_yac_gi % 7 ] );
+								}
+								?>
+								<?php echo wp_yac_pie( array_map( function ( $s ) { return array( $s[0], $s[1], $s[3] ); }, $wp_yac_slices ) ); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+								<ul class="wp-yac-pie-legend">
+								<?php foreach ( $wp_yac_slices as $wp_yac_s ) : ?>
+									<li>
+										<span class="dot" style="background: <?php echo esc_attr( $wp_yac_s[3] ); ?>"></span>
+										<span class="g" title="<?php echo esc_attr( $wp_yac_s[0] ); ?>"><?php echo esc_html( $wp_yac_s[0] ); ?> <small><?php echo esc_html( round( $wp_yac_s[1] / max( 1, $snapshot['entries'] ) * 100 ) . '%' ); ?></small></span>
+										<strong><?php echo esc_html( number_format_i18n( $wp_yac_s[1] ) ); ?> <small>keys &middot; <?php echo esc_html( wp_yac_format_bytes( $wp_yac_s[2] ) ); ?></small></strong>
+									</li>
+								<?php endforeach; ?>
+								</ul>
 							<?php endif; ?>
-						</td>
-					</tr>
-					<tr>
-						<td>WordPress</td>
-						<td><code><?php echo esc_html( get_bloginfo( 'version' ) ); ?></code></td>
-					</tr>
-					<tr>
-						<td>PHP</td>
-						<td><code><?php echo esc_html( PHP_VERSION ); ?> (<?php echo esc_html( PHP_SAPI ); ?>)</code></td>
-					</tr>
-					<tr>
-						<td><?php echo esc_html( 'Yac extension' ); ?></td>
-						<td><code><?php echo esc_html( extension_loaded( 'yac' ) ? ( phpversion( 'yac' ) ? phpversion( 'yac' ) : 'loaded' ) : 'not loaded' ); ?></code></td>
-					</tr>
-					<?php if ( null !== $info ) : ?>
-						<tr>
-							<td><?php echo esc_html( 'Shared memory segments' ); ?></td>
-							<td><code><?php echo esc_html( $info['segment_num'] . ' × ' . wp_yac_format_bytes( $info['segment_size'] ) ); ?></code></td>
-						</tr>
-					<?php endif; ?>
-					<tr>
-						<td><?php echo esc_html( 'Drop-in path' ); ?></td>
-						<td><code><?php echo esc_html( WP_YAC_DROPIN_DEST ); ?></code></td>
-					</tr>
-					</tbody>
-				</table>
+						</div>
+						<div class="wp-yac-contents-right">
+							<ul class="wp-yac-op-list">
+								<li><span><?php echo esc_html( 'Total entries' ); ?></span><strong><?php echo esc_html( number_format_i18n( $snapshot['entries'] ) ); ?></strong></li>
+								<li><span><?php echo esc_html( 'Occupied (Σ size, padded)' ); ?></span><strong><?php echo esc_html( wp_yac_format_bytes( $snapshot['occupied'] ) ); ?></strong></li>
+								<li><span><?php echo esc_html( 'Content (Σ v_len)' ); ?></span><strong><?php echo esc_html( wp_yac_format_bytes( $snapshot['bytes'] ) ); ?></strong></li>
+								<li><span><?php echo esc_html( 'Average occupied / entry' ); ?></span><strong><?php echo esc_html( wp_yac_format_bytes( $snapshot['average'] ) ); ?></strong></li>
+							</ul>
+							<?php if ( ! empty( $snapshot['largest'] ) ) : ?>
+								<h3 style="margin: 14px 0 6px; font-size: 13px"><?php echo esc_html( 'Largest entries (by content length)' ); ?></h3>
+								<?php $largest_size = max( array_column( $snapshot['largest'], 0 ) ); ?>
+								<ul class="wp-yac-entry-bars wp-yac-entry-bars-lg">
+								<?php foreach ( $snapshot['largest'] as $entry ) : ?>
+									<li>
+										<span class="wp-yac-entry-key" title="<?php echo esc_attr( $entry[2] ); ?>"><?php echo esc_html( $entry[2] ); ?></span>
+										<span class="wp-yac-entry-bar-track"><span class="wp-yac-entry-bar" style="width: <?php echo esc_attr( round( $entry[0] / $largest_size * 100 ) ); ?>%"></span></span>
+										<strong><?php echo esc_html( wp_yac_format_bytes( $entry[0] ) ); ?></strong>
+									</li>
+								<?php endforeach; ?>
+								</ul>
+							<?php endif; ?>
+							<p class="wp-yac-note"><?php echo esc_html( 'Occupied = Σ entry.size (padded); Content = Σ v_len; overwritten-but-unreclaimed entries slightly overstate. Flush wipes the machine’s entire shared memory.' ); ?></p>
+						</div>
+					</div>
+				<?php endif; ?>
+			</div>
 
-				<h3 style="margin: 16px 0 6px; font-size: 13px"><?php echo esc_html( 'Configuration' ); ?></h3>
+			<h2><?php echo esc_html( 'Configuration' ); ?></h2>
+			<div class="wp-yac-panel">
 				<table class="wp-yac-config-table">
 					<thead>
 						<tr>
@@ -910,35 +1000,90 @@ function wp_yac_render_admin_page() {
 				</table>
 			</div>
 
-			<div class="wp-yac-panel" style="flex: 1 1 340px">
-				<h2><?php echo esc_html( 'Shared memory contents' ); ?></h2>
-				<?php $snapshot = wp_yac_memory_snapshot(); ?>
-				<?php if ( null === $snapshot ) : ?>
-					<p class="wp-yac-note"><?php echo esc_html( 'Requires the Yac extension.' ); ?></p>
-				<?php else : ?>
-					<ul class="wp-yac-op-list">
-						<li><span><?php echo esc_html( 'Total entries' ); ?></span><strong><?php echo esc_html( number_format_i18n( $snapshot['entries'] ) ); ?></strong></li>
-						<li><span><?php echo esc_html( 'Data size' ); ?></span><strong><?php echo esc_html( wp_yac_format_bytes( $snapshot['bytes'] ) ); ?></strong></li>
-						<li><span><?php echo esc_html( 'Average entry size' ); ?></span><strong><?php echo esc_html( wp_yac_format_bytes( $snapshot['average'] ) ); ?></strong></li>
-					</ul>
+		<?php endif; ?>
 
-					<?php if ( ! empty( $snapshot['largest'] ) ) : ?>
-						<h3 style="margin: 14px 0 4px; font-size: 13px"><?php echo esc_html( 'Largest entries' ); ?></h3>
-						<?php $largest_size = max( array_column( $snapshot['largest'], 0 ) ); ?>
-						<ul class="wp-yac-entry-bars">
-						<?php foreach ( $snapshot['largest'] as $entry ) : ?>
-							<li>
-								<span class="wp-yac-entry-key" title="<?php echo esc_attr( $entry[1] ); ?>"><?php echo esc_html( $entry[1] ); ?></span>
-								<span class="wp-yac-entry-bar-track"><span class="wp-yac-entry-bar" style="width: <?php echo esc_attr( round( $entry[0] / $largest_size * 100 ) ); ?>%"></span></span>
-								<strong><?php echo esc_html( wp_yac_format_bytes( $entry[0] ) ); ?></strong>
-							</li>
-						<?php endforeach; ?>
-						</ul>
+		<h2><?php echo esc_html( 'Diagnostics' ); ?></h2>
+		<div class="wp-yac-panel">
+			<table class="wp-yac-config-table">
+				<thead>
+					<tr>
+						<th><?php echo esc_html( 'Item' ); ?></th>
+						<th><?php echo esc_html( 'Value' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+				<tr>
+					<td><?php echo esc_html( 'Plugin version' ); ?></td>
+					<td><code><?php echo esc_html( WP_YAC_VERSION ); ?></code></td>
+				</tr>
+				<tr>
+					<td><?php echo esc_html( 'Drop-in version' ); ?></td>
+					<td>
+						<?php $dropin_version = wp_yac_dropin_version(); ?>
+						<?php if ( null === $dropin_version ) : ?>
+							<code>—</code>
+						<?php else : ?>
+							<code><?php echo esc_html( $dropin_version ); ?></code>
+							<?php if ( version_compare( WP_YAC_VERSION, $dropin_version, '>' ) ) : ?>
+								<span style="color: #996800"> — <?php echo esc_html( 'outdated, update it from the actions below' ); ?></span>
+							<?php else : ?>
+								<span style="color: #1e7a31"> — <?php echo esc_html( 'up to date' ); ?></span>
+							<?php endif; ?>
+						<?php endif; ?>
+					</td>
+				</tr>
+				<tr>
+					<td>WordPress</td>
+					<td><code><?php echo esc_html( get_bloginfo( 'version' ) ); ?></code></td>
+				</tr>
+				<tr>
+					<td>PHP</td>
+					<td><code><?php echo esc_html( PHP_VERSION ); ?> (<?php echo esc_html( PHP_SAPI ); ?>)</code></td>
+				</tr>
+				<tr>
+					<td><?php echo esc_html( 'Yac extension' ); ?></td>
+					<td><code><?php echo esc_html( extension_loaded( 'yac' ) ? ( phpversion( 'yac' ) ? phpversion( 'yac' ) : 'loaded' ) : 'not loaded' ); ?></code></td>
+				</tr>
+				<tr>
+					<td><code>yac.enable</code></td>
+					<td><code><?php echo esc_html( ini_get( 'yac.enable' ) ? '1' : '0' ); ?></code> — <?php echo esc_html( 'master switch of the extension' ); ?></td>
+				</tr>
+				<tr>
+					<td><code>yac.keys_memory_size</code></td>
+					<td><code><?php echo esc_html( ini_get( 'yac.keys_memory_size' ) ); ?></code> — <?php echo esc_html( 'slot table (~32K slots per 4M); raise when keys fill and hit rate suffers' ); ?></td>
+				</tr>
+				<tr>
+					<td><code>yac.values_memory_size</code></td>
+					<td><code><?php echo esc_html( ini_get( 'yac.values_memory_size' ) ); ?></code> — <?php echo esc_html( 'values pool; raise when occupied approaches it' ); ?></td>
+				</tr>
+				<tr>
+					<td><code>yac.serializer</code></td>
+					<td><code><?php echo esc_html( ini_get( 'yac.serializer' ) ?: 'php' ); ?></code></td>
+				</tr>
+				<tr>
+					<td><code>yac.compress_threshold</code></td>
+					<td><code><?php echo esc_html( ini_get( 'yac.compress_threshold' ) ?: '-1' ); ?></code> — <?php echo esc_html( 'values larger than this (bytes) are fastlz-compressed; -1 disables' ); ?></td>
+				</tr>
+				<tr>
+					<td><code>yac.enable_cli</code></td>
+					<td><code><?php echo esc_html( ini_get( 'yac.enable_cli' ) ? '1' : '0' ); ?></code></td>
+				</tr>
+				<tr>
+					<td><?php echo esc_html( 'Key budget' ); ?></td>
+					<td><code><?php echo esc_html( ( defined( 'YAC_MAX_KEY_LEN' ) ? YAC_MAX_KEY_LEN : 48 ) ); ?> B</code> max, <code><?php echo esc_html( ( defined( 'YAC_MAX_KEY_LEN' ) ? YAC_MAX_KEY_LEN : 48 ) - strlen( wp_yac_key_prefix() ) ); ?> B</code> logical after prefix <code><?php echo esc_html( wp_yac_key_prefix() ); ?></code> — <?php echo esc_html( 'longer keys keep the group and hash the rest' ); ?></td>
+				</tr>
+				<?php if ( null !== $info ) : ?>
+					<tr>
+						<td><?php echo esc_html( 'Shared memory segments' ); ?></td>
+						<td><code><?php echo esc_html( $info['segment_num'] . ' × ' . wp_yac_format_bytes( $info['segment_size'] ) ); ?></code></td>
+					</tr>
 					<?php endif; ?>
-
-					<p class="wp-yac-note"><?php echo esc_html( 'Sizes are the serialized value length (v_len), without Yac’s internal padding. wp_cache_flush() calls Yac::flush(), which wipes the ENTIRE shared memory on this machine — including data written by other Yac users on the same PHP pool.' ); ?></p>
-				<?php endif; ?>
-			</div>
+				<tr>
+					<td><?php echo esc_html( 'Drop-in path' ); ?></td>
+					<td><code><?php echo esc_html( WP_YAC_DROPIN_DEST ); ?></code></td>
+				</tr>
+				</tbody>
+			</table>
 		</div>
 
 		<h2><?php echo esc_html( 'Actions' ); ?></h2>

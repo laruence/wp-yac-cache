@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.0.0
+Stable tag: 1.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -23,7 +23,7 @@ Unlike Memcached or Redis, Yac stores data in **shared memory inherited by every
 * **Self-deploying.** Activating the plugin writes `object-cache.php` to `wp-content/`.
 * **Simple keys, simple flush.** Keys are stored verbatim while they fit Yac's 48-byte limit; `wp_cache_flush()` calls `Yac::flush()` and wipes the entire shared memory on the machine — know that before you flush.
 * **Graceful degradation.** If Yac is unavailable (extension missing), the drop-in falls back to a per-request in-memory cache and WordPress keeps working.
-* **Multisite aware.** Site-scoped and global groups are keyed separately; `switch_to_blog()` supported.
+* **Single-node focus.** Keys carry no per-blog prefix; installs sharing one PHP pool isolate via `WP_YAC_KEY_PREFIX`. Multisite blogs share one namespace.
 
 **Performance**
 
@@ -54,7 +54,7 @@ phpize && ./configure && make && sudo make install
 
 `
 define( 'WP_CACHE', true );
-define( 'WP_CACHE_KEY_SALT', 'a long random string, unique per install' );
+define( 'WP_YAC_KEY_PREFIX', 'ab_' ); // unique per install when sites share one PHP pool
 `
 
 That is it. Visit **Tools → Yac Object Cache** to verify status.
@@ -65,6 +65,13 @@ That is it. Visit **Tools → Yac Object Cache** to verify status.
 yac.enable = 1
 yac.keys_memory_size = 4M       ; ~32K slots
 yac.values_memory_size = 64M    ; raise for large sites (big alloptions)
+`
+
+**Optional wp-config switches**
+
+`
+define( 'WP_YAC_SKIP_EMPTY', false ); // filter is on by default; set false to also store empty get_page_by_path negatives
+define( 'WP_YAC_DISABLE', true );     // emergency escape hatch: force runtime-only mode
 `
 
 == Frequently Asked Questions ==
@@ -79,7 +86,7 @@ The drop-in degrades to a per-request in-memory cache. Your site keeps working; 
 
 = How are keys stored, given Yac's 48-byte key limit? =
 
-Storage keys are `<prefix><group>:<key>`, kept verbatim while they fit the 48-byte budget (the instance prefix already carries the salt). Only keys that exceed the budget are hashed (`crc32b`) down to a fixed length.
+Storage keys are `<WP_YAC_KEY_PREFIX>:<group>:<key>` (default prefix `wp`), kept verbatim while they fit the 48-byte budget; over-long keys keep the group verbatim and hash (crc32b) only the key part. Keys carry no per-blog prefix: use a different WP_YAC_KEY_PREFIX per install when sites share one PHP pool; multisite blogs share the namespace.
 
 = Does flush() clear other Yac users on the same machine? =
 
@@ -87,13 +94,19 @@ Yes. `wp_cache_flush()` calls `Yac::flush()`, which wipes the entire shared memo
 
 = Multisite? =
 
-Yes. Global groups and per-blog groups are keyed separately, and `switch_to_blog()` is supported.
+Yes, with a caveat: blogs of one install share the cache namespace (keys carry no blog prefix), which is fine for most sites; `switch_to_blog()` does not re-namespace keys. Run separate installs with different `WP_YAC_KEY_PREFIX` values when blogs must not share entries.
 
 = What about wp_cache_flush_group()? =
 
 Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so WordPress core does not rely on it.
 
 == Changelog ==
+
+= 1.1.1 =
+* Dashboard rebuilt around a cache-health verdict: hit-rate ring, cause-attributed metric bars, keys-by-group pie, largest entries by content length, configuration reference and runtime diagnostics.
+* Key format rework: `<prefix>:<group>:<key>` with no per-blog prefix (default prefix `wp`); over-long keys keep the group verbatim and hash only the key part; `switch_to_blog()` no longer re-namespaces keys.
+* `WP_YAC_SKIP_EMPTY` (on by default): empty `get_page_by_path:` negatives (bot 404 probes) stay request-local instead of filling slots.
+* `WP_YAC_DISABLE` escape hatch forces runtime-only mode.
 
 = 1.0.0 =
 * Initial release. Yac-backed object cache with self-deploying drop-in, verbatim keys with hashed fallback, multisite support, and graceful runtime-only fallback.

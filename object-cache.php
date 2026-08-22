@@ -7,10 +7,21 @@
  * so a get() is one hash lookup: no server, no socket, no network.
  *
  * - Keys are stored verbatim as "<prefix><group>:<key>" as long as they
- *   fit Yac's 48-byte limit (instance prefix included); only keys that
- *   exceed the budget are hashed (crc32b) down to a fixed length.
- * - The key salt lives in the Yac instance prefix, so installs sharing
- *   one PHP pool never see each other's entries.
+ *   fit Yac's 48-byte limit (instance prefix included); over-long keys
+ *   keep the group verbatim and hash (crc32b) only the key part, so
+ *   dumps and the dashboard pie chart stay attributable by group.
+ * - WP_YAC_SKIP_EMPTY (default on, the single pollution filter): bots
+ *   probe unbounded one-off URLs, and each 404 path mints a
+ *   get_page_by_path:<md5> key whose value is an empty negative result
+ *   never re-read, yet each occupies a slot — those empty values stay
+ *   request-local. Stable per-entity negative caches (comment children,
+ *   term relationships, adjacent posts...) are re-read on every view
+ *   and keep being shared; when their working set outgrows the slot
+ *   table, the remedy is a bigger yac.keys_memory_size, not skipping.
+ * - Keys carry no per-blog prefix: single-node installs are the target
+ *   and per-site isolation lives in WP_YAC_KEY_PREFIX instead. Installs
+ *   sharing one PHP pool must use different prefixes; multisite blogs
+ *   share the namespace by design.
  * - wp_cache_flush() calls Yac::flush() and clears the ENTIRE shared
  *   memory on this machine, including data of other Yac users.
  * - Values are wrapped in array('v' => ...) because Yac::get() returns
@@ -22,19 +33,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-if ( ! defined( 'WP_CACHE_KEY_SALT' ) ) {
-	/* multiple installs sharing one wp-config/table_prefix must set this */
-	define( 'WP_CACHE_KEY_SALT', 'wp-yac-default-salt' );
-}
-
 if ( ! defined( 'WP_YAC_KEY_PREFIX' ) ) {
 	/* human readable part of the storage key; 0-6 chars, shorter is
 	   better: every byte here shrinks the room for the logical key */
-	define( 'WP_YAC_KEY_PREFIX', 'wp_' );
+	define( 'WP_YAC_KEY_PREFIX', 'wp' );
 }
 
 if ( ! defined( 'WP_YAC_DROPIN_VERSION' ) ) {
-	define( 'WP_YAC_DROPIN_VERSION', '1.0.0' );
+	define( 'WP_YAC_DROPIN_VERSION', '1.1.1' );
+}
+
+if ( ! defined( 'WP_YAC_SKIP_EMPTY' ) ) {
+	define( 'WP_YAC_SKIP_EMPTY', true );
 }
 
 function wp_cache_add( $key, $data, $group = '', $expire = 0 ) {
@@ -202,11 +212,7 @@ class WP_Object_Cache {
 	private $non_persistent_groups = array();
 	private $global_groups = array();
 
-	private $blog_prefix = '';
-	private $global_prefix = '';
-	private $key_salt = '';
-
-	private $storage_prefix = ''; /* Yac instance prefix, carries the salt */
+	private $storage_prefix = ''; /* Yac instance prefix; the only per-site isolation */
 	private $logical_key_budget = 34; /* bytes left after the instance prefix */
 
 	public $cache_hits = 0;
@@ -224,8 +230,6 @@ class WP_Object_Cache {
 	private $written = array();
 
 	public function __construct() {
-		global $blog_id, $table_prefix;
-
 		$this->stats = array(
 			'get'          => 0,
 			'get_local'    => 0,
@@ -236,23 +240,12 @@ class WP_Object_Cache {
 			'slow-ops'     => 0,
 		);
 
-		$this->global_prefix = '';
-		$this->blog_prefix   = '';
-
-		if ( function_exists( 'is_multisite' ) ) {
-			$this->global_prefix = ( is_multisite() || ( defined( 'CUSTOM_USER_TABLE' ) && defined( 'CUSTOM_USER_META_TABLE' ) ) ) ? '' : $table_prefix;
-			$this->blog_prefix   = is_multisite() ? $blog_id : $table_prefix;
-		} else {
-			$this->blog_prefix = $table_prefix;
-		}
-
-		$this->key_salt = WP_CACHE_KEY_SALT;
-
-		/* the salt hash keeps installs on one PHP pool apart; the
-		   user prefix is cosmetic, so entries stay greppable. The budget
-		   is the key bytes left inside YAC_MAX_KEY_LEN (48 incl. prefix) */
-		$this->storage_prefix = substr( preg_replace( '/[^A-Za-z0-9_]/', '', (string) WP_YAC_KEY_PREFIX ), 0, 6 )
-			. substr( hash( 'crc32b', $this->key_salt ), 0, 8 ) . ':';
+		/* the prefix is the only isolation between installs sharing one
+		   PHP pool — use a different WP_YAC_KEY_PREFIX per site. Keys
+		   carry no per-blog prefix; multisite blogs share the namespace
+		   by design. Budget = key bytes left inside YAC_MAX_KEY_LEN
+		   (48 incl. prefix) */
+		$this->storage_prefix = substr( preg_replace( '/[^A-Za-z0-9_]/', '', (string) WP_YAC_KEY_PREFIX ), 0, 6 ) . ':';
 
 		if ( defined( 'YAC_MAX_KEY_LEN' ) ) {
 			$this->logical_key_budget = max( 8, YAC_MAX_KEY_LEN - strlen( $this->storage_prefix ) );
@@ -297,6 +290,15 @@ class WP_Object_Cache {
 
 		if ( isset( $this->written[ $key ] ) || false !== $this->yac->get( $key ) ) {
 			return false;
+		}
+
+		if ( $this->shm_write_skip( $id, $group, $data ) ) {
+			if ( isset( $this->cache[ $key ]['found'] ) && $this->cache[ $key ]['found'] ) {
+				return false;
+			}
+
+			$this->add_to_internal_cache( $key, $data, $group );
+			return true;
 		}
 
 		$ttl = $this->sanitize_ttl( $expire );
@@ -604,6 +606,11 @@ class WP_Object_Cache {
 			return true;
 		}
 
+		if ( $this->shm_write_skip( $id, $group, $data ) ) {
+			$this->cache[ $key ]['found'] = true;
+			return true;
+		}
+
 		$ttl = $this->sanitize_ttl( $expire );
 
 		$this->timer_start();
@@ -631,13 +638,9 @@ class WP_Object_Cache {
 		return $values;
 	}
 
+	/* keys carry no blog prefix anymore; blogs intentionally share the
+	   namespace (use separate installs/prefixes when they must not) */
 	public function switch_to_blog( $blog_id ) {
-		global $table_prefix;
-
-		$blog_id = (int) $blog_id;
-
-		$this->blog_prefix = ( function_exists( 'is_multisite' ) && is_multisite() ) ? $blog_id : $table_prefix;
-
 		return true;
 	}
 
@@ -659,25 +662,47 @@ class WP_Object_Cache {
 		return true;
 	}
 
-	/* storage key = "<prefix><group>:<key>", stored verbatim while it fits
-	   the byte budget (the instance prefix already counts against Yac's
-	   48 bytes); only oversized keys are hashed down to a fixed length */
+	/* storage key = "<prefix><group>:<key>"; while it fits the byte
+	   budget it is stored verbatim; over-long keys keep the group
+	   verbatim (attribution for dumps / the dashboard pie) and hash
+	   only the key part */
 	public function key( $key, $group ) {
-		$group = $this->sanitize_group( $group );
+		list( $logical, $over, $head ) = $this->logical_key( $key, $group );
 
-		if ( in_array( $group, $this->global_groups, true ) ) {
-			$prefix = $this->global_prefix;
-		} else {
-			$prefix = $this->blog_prefix;
-		}
-
-		$logical = $prefix . $group . ':' . $key;
-
-		if ( strlen( $logical ) <= $this->logical_key_budget ) {
+		if ( ! $over ) {
 			return $logical;
 		}
 
+		if ( strlen( $head ) + 8 <= $this->logical_key_budget ) {
+			return $head . hash( 'crc32b', $key );
+		}
+
 		return hash( 'crc32b', $logical );
+	}
+
+	private function logical_key( $key, $group ) {
+		$group   = $this->sanitize_group( $group );
+		$logical = $group . ':' . $key;
+
+		return array( $logical, strlen( $logical ) > $this->logical_key_budget, $group . ':' );
+	}
+
+	/* the single pollution filter: empty get_page_by_path negatives
+	   (bot 404 probes, never re-read) stay request-local; stable
+	   per-entity negative caches keep sharing — when those outgrow the
+	   table, raise keys_memory_size */
+	private function shm_write_skip( $id, $group, $data ) {
+		if ( ! WP_YAC_SKIP_EMPTY ) {
+			return false;
+		}
+
+		if ( null !== $data && ! ( is_array( $data ) && empty( $data ) ) ) {
+			return false;
+		}
+
+		list( $logical ) = $this->logical_key( $id, $group );
+
+		return false !== strpos( $logical, 'get_page_by_path:' );
 	}
 
 	private function sanitize_group( $group ) {
