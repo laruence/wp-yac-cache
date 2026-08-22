@@ -26,6 +26,7 @@ register_activation_hook( __FILE__, 'wp_yac_activate' );
 register_deactivation_hook( __FILE__, 'wp_yac_deactivate' );
 
 add_action( 'admin_menu', 'wp_yac_admin_menu' );
+add_action( 'wp_dashboard_setup', 'wp_yac_register_dashboard_widget' );
 add_action( 'admin_notices', 'wp_yac_admin_notices' );
 add_action( 'admin_init', 'wp_yac_admin_init' );
 add_action( 'debug_information', 'wp_yac_site_health_info' );
@@ -165,7 +166,7 @@ function wp_yac_self_test() {
 
 /* entry-level statistics from Yac::dump() (null when unavailable);
    dump(-1) fetches everything — the default limit is 100 */
-function wp_yac_memory_snapshot( $top = 10, $prefix = '' ) {
+function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 	if ( isset( $GLOBALS['wp_yac_test_snapshot'] ) ) {
 		return $GLOBALS['wp_yac_test_snapshot'];
 	}
@@ -174,7 +175,15 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '' ) {
 		return null;
 	}
 
-	$yac     = new Yac();
+	$yac = new Yac();
+
+	if ( $cache_ttl > 0 && '' !== $prefix ) {
+		$cached = $yac->get( 'diag:snapshot' );
+		if ( is_array( $cached ) ) {
+			return $cached;
+		}
+	}
+
 	$entries = $yac->dump( -1 );
 	if ( ! is_array( $entries ) ) {
 		return null;
@@ -198,7 +207,17 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '' ) {
 
 		$bytes    += $vlen;
 		$occupied += $alloc;
-		$largest[] = array( $vlen, $alloc, $key );
+
+		/* diag:* keys are the plugin's own markers; keep them out of
+		   the pie chart and largest-entries list */
+		$is_diag = ( '' !== $prefix && 0 === strpos( $key, $prefix . 'diag:' ) );
+		if ( ! $is_diag ) {
+			$largest[] = array( $vlen, $alloc, $key );
+		}
+
+		if ( $is_diag ) {
+			continue;
+		}
 
 		if ( '' !== $prefix && 0 === strpos( $key, $prefix ) ) {
 			$own++;
@@ -242,7 +261,7 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '' ) {
 
 	rsort( $largest );
 
-	return array(
+	$result = array(
 		'entries'  => $total,
 		'bytes'    => $bytes,
 		'occupied' => $occupied,
@@ -251,6 +270,12 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '' ) {
 		'largest'  => array_slice( $largest, 0, $top ),
 		'groups'   => $group_list,
 	);
+
+	if ( $cache_ttl > 0 && '' !== $prefix ) {
+		$yac->set( 'diag:snapshot', $result, $cache_ttl );
+	}
+
+	return $result;
 }
 
 /* returns rows of [ key, ok|warn|err, message ] */
@@ -566,6 +591,61 @@ function wp_yac_admin_menu() {
 		WP_YAC_ADMIN_PAGE,
 		'wp_yac_render_admin_page'
 	);
+}
+
+/* compact health summary on the WP admin dashboard; the snapshot is
+   shared-memory cached for 60s so the frequent dashboard loads do not
+   re-walk the slot table */
+function wp_yac_register_dashboard_widget() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+
+	wp_add_dashboard_widget( 'wp_yac_health_widget', 'Yac Object Cache', 'wp_yac_render_dashboard_widget' );
+}
+
+function wp_yac_render_dashboard_widget() {
+	$info = wp_yac_storage_info();
+
+	if ( null === $info ) {
+		echo '<p>' . esc_html( 'Yac extension not loaded — the object cache runs runtime-only.' )
+			. ' <a href="' . esc_url( admin_url( 'tools.php?page=' . WP_YAC_ADMIN_PAGE ) ) . '">' . esc_html( 'Details' ) . '</a></p>';
+		return;
+	}
+
+	$health = wp_yac_health( $info, wp_yac_memory_snapshot( 10, wp_yac_key_prefix(), 60 ) );
+
+	$colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638' );
+	$color  = $colors[ $health['verdict'] ];
+	$chips  = array( 'green' => '✓ Healthy', 'yellow' => '⚠ Attention', 'red' => '✗ Critical' );
+
+	$ratio = max( 0, min( 1, $health['rate'] / 100 ) );
+	$r     = 45;
+	$circ  = 2 * M_PI * $r;
+
+	$keys_total   = (int) $info['slots_size'];
+	$keys_used    = (int) $info['slots_used'];
+	$values_total = (int) $info['values_memory_size'];
+	?>
+	<div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+		<div style="display: flex; flex-direction: column; align-items: center;">
+			<svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="<?php echo esc_attr( round( $health['rate'], 1 ) ); ?>%">
+				<circle cx="60" cy="60" r="<?php echo esc_attr( $r ); ?>" stroke="#f0f0f1" stroke-width="12" fill="none"/>
+				<circle cx="60" cy="60" r="<?php echo esc_attr( $r ); ?>" stroke="<?php echo esc_attr( $color ); ?>" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="<?php echo esc_attr( round( $circ * $ratio, 2 ) ); ?> <?php echo esc_attr( round( $circ, 2 ) ); ?>" transform="rotate(-90 60 60)"/>
+				<text x="60" y="58" font-size="21" font-weight="600" fill="#1d2327" text-anchor="middle"><?php echo esc_html( round( $health['rate'], 1 ) ); ?>%</text>
+				<text x="60" y="76" font-size="10" fill="#646970" text-anchor="middle">hit rate</text>
+			</svg>
+			<div style="margin-top: 6px; border-radius: 20px; padding: 3px 12px; font-size: 12px; font-weight: 600; color: <?php echo esc_attr( $color ); ?>; background: <?php echo 'green' === $health['verdict'] ? '#edfaef' : ( 'yellow' === $health['verdict'] ? '#fcf9e8' : '#fcf0f1' ); ?>;"><?php echo esc_html( $chips[ $health['verdict'] ] ); ?></div>
+		</div>
+		<div style="flex: 1; min-width: 220px; font-size: 13px; color: #50575e;">
+			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Keys' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( $keys_used ) . ' / ' . number_format_i18n( $keys_total ) ); ?></strong></div>
+			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Values occupied' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( wp_yac_format_bytes( $health['vals_pct'] / 100 * $values_total ) . ' / ' . wp_yac_format_bytes( $values_total ) ); ?></strong></div>
+			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Hits / Misses' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( (int) $info['hits'] ) . ' / ' . number_format_i18n( (int) $info['miss'] ) ); ?></strong></div>
+			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Kicks / Recycles' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( (int) $info['kicks'] ) . ' / ' . number_format_i18n( (int) $info['recycles'] ) ); ?></strong></div>
+			<p style="margin: 8px 0 0;"><a href="<?php echo esc_url( admin_url( 'tools.php?page=' . WP_YAC_ADMIN_PAGE ) ); ?>"><?php echo esc_html( 'Full dashboard' ); ?></a></p>
+		</div>
+	</div>
+	<?php
 }
 
 function wp_yac_admin_notices() {

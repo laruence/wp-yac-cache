@@ -273,6 +273,14 @@ check( 'healthy status collapses to active bar', strpos( $html, 'Active' ) !== f
 check( 'healthy status shows no problem rows', strpos( $html, 'FAIL' ) === false && strpos( $html, '>WARN<' ) === false );
 check( 'round trip folded into Active bar', ! wp_yac_backend_usable() || strpos( $html, 'round trip' ) !== false );
 
+// --- Dashboard widget -------------------------------------------------------
+
+ob_start();
+wp_yac_render_dashboard_widget();
+$widget_html = ob_get_clean();
+check( 'dashboard widget renders hit rate', strpos( $widget_html, 'hit rate' ) !== false );
+check( 'dashboard widget links to full dashboard', strpos( $widget_html, 'Full dashboard' ) !== false );
+
 // --- Dump for visual inspection ------------------------------------------------
 
 if ( getenv( 'RENDER_HTML' ) ) {
