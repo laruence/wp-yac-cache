@@ -24,6 +24,7 @@ Unlike Memcached or Redis, Yac stores data in **shared memory inherited by every
 * **Simple keys, simple flush.** Keys are stored verbatim while they fit Yac's 48-byte limit; `wp_cache_flush()` calls `Yac::flush()` and wipes the entire shared memory on the machine — know that before you flush.
 * **Graceful degradation.** If Yac is unavailable (extension missing), the drop-in falls back to a per-request in-memory cache and WordPress keeps working.
 * **Single-node focus.** Keys carry no per-blog prefix; installs sharing one PHP pool isolate via `WP_YAC_KEY_PREFIX`. Multisite blogs share one namespace.
+* **Entry inspector.** On the admin page, click any Largest-entries key to see the deserialized value, padded size, expiry and last access (newer yac builds) — or delete the entry.
 
 **Performance**
 

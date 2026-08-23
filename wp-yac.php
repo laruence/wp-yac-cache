@@ -22,6 +22,13 @@ define( 'WP_YAC_DROPIN_SOURCE', __DIR__ . '/object-cache.php' );
 define( 'WP_YAC_DROPIN_DEST', WP_CONTENT_DIR . '/object-cache.php' );
 define( 'WP_YAC_ADMIN_PAGE', 'wp-yac' );
 
+/* health metrics stay untouched until this many lookups have passed: a
+   cold cache is dominated by compulsory first-read misses, so early
+   verdicts would be false alarms */
+if ( ! defined( 'WP_YAC_WARMUP_LOOKUPS' ) ) {
+	define( 'WP_YAC_WARMUP_LOOKUPS', 1000 );
+}
+
 register_activation_hook( __FILE__, 'wp_yac_activate' );
 register_deactivation_hook( __FILE__, 'wp_yac_deactivate' );
 
@@ -31,6 +38,8 @@ add_action( 'admin_notices', 'wp_yac_admin_notices' );
 add_action( 'admin_init', 'wp_yac_admin_init' );
 add_action( 'debug_information', 'wp_yac_site_health_info' );
 add_action( 'wp_ajax_wp_yac_dismiss_status_notice', 'wp_yac_ajax_dismiss_status_notice' );
+add_action( 'wp_ajax_wp_yac_entry', 'wp_yac_ajax_entry' );
+add_action( 'wp_ajax_wp_yac_entry_delete', 'wp_yac_ajax_entry_delete' );
 
 /* the uninstall hook cannot live in the drop-in */
 if ( is_admin() ) {
@@ -189,7 +198,8 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 		return null;
 	}
 
-	$total    = count( $entries );
+	$now      = time();
+	$total    = 0;
 	$bytes    = 0;
 	$occupied = 0;
 	$own      = 0;
@@ -204,6 +214,13 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 		$vlen  = isset( $entry['v_len'] ) ? (int) $entry['v_len'] : 0;
 		$alloc = isset( $entry['size'] ) ? (int) $entry['size'] : 0;
 		$key   = isset( $entry['key'] ) ? $entry['key'] : '';
+
+		/* expired entries (ttl elapsed) are dead data awaiting overwrite;
+		   the contents view reports live entries only */
+		if ( ! empty( $entry['ttl'] ) && $entry['ttl'] <= $now ) {
+			continue;
+		}
+		$total++;
 
 		$bytes    += $vlen;
 		$occupied += $alloc;
@@ -416,14 +433,33 @@ function wp_yac_health( $info, $snapshot ) {
 	$occupied     = $snapshot ? (float) $snapshot['occupied'] : 0;
 	$vals_pct     = $values_total > 0 ? $occupied / $values_total * 100 : 0;
 
+	$lookups = (int) $info['hits'] + (int) $info['miss'];
+
+	/* cold cache: the first reads are compulsory misses while the working
+	   set loads, so any verdict would be a false alarm; report a neutral
+	   warm-up state until enough lookups have passed */
+	if ( $lookups < WP_YAC_WARMUP_LOOKUPS ) {
+		return array(
+			'verdict'     => 'warmup',
+			'rate'        => null,
+			'lookups'     => $lookups,
+			'keys_pct'    => $keys_pct,
+			'vals_pct'    => $vals_pct,
+			'kick_obs'    => 0,
+			'kick_exp'    => 0,
+			'foreign_pct' => 0,
+			'causes'      => array(),
+			'advice'      => '',
+		);
+	}
+
 	/* yac builds with window counters report the hit rate of the last
 	   completed ~20K-lookup window; older builds fall back to the
 	   since-FPM-start aggregate */
 	if ( isset( $info['win_rate'], $info['win_reset_tv'] ) && (int) $info['win_reset_tv'] > time() - 3600 ) {
 		$rate = (float) $info['win_rate'] / 10;
 	} else {
-		$lookups = (int) $info['hits'] + (int) $info['miss'];
-		$rate    = $lookups > 0 ? (int) $info['hits'] / $lookups * 100 : 0;
+		$rate = $lookups > 0 ? (int) $info['hits'] / $lookups * 100 : 0;
 	}
 
 	$verdict = 'green';
@@ -488,6 +524,7 @@ function wp_yac_health( $info, $snapshot ) {
 	return array(
 		'verdict'     => $verdict,
 		'rate'        => $rate,
+		'lookups'     => $lookups,
 		'keys_pct'    => $keys_pct,
 		'vals_pct'    => $vals_pct,
 		'kick_obs'    => $kick_obs,
@@ -529,23 +566,25 @@ function wp_yac_pie( $slices ) {
 
 	return $svg . '</svg>';
 }
-function wp_yac_health_donut( $pct, $color ) {
-	$ratio = max( 0, min( 1, $pct / 100 ) );
+function wp_yac_health_donut( $pct, $color, $center = null, $sub = 'hit rate' ) {
+	$ratio = max( 0, min( 1, (float) $pct / 100 ) );
 	$r     = 80;
 	$circ  = 2 * M_PI * $r;
+	$label = null === $center ? round( (float) $pct, 1 ) . '%' : $center;
 
 	return sprintf(
-		'<svg class="wp-yac-health-donut" viewBox="0 0 200 200" role="img" aria-label="%1$s%%">'
+		'<svg class="wp-yac-health-donut" viewBox="0 0 200 200" role="img" aria-label="%1$s">'
 		. '<circle class="wp-yac-donut-track" cx="100" cy="100" r="%2$d"/>'
 		. '<circle class="wp-yac-donut-fill" cx="100" cy="100" r="%2$d" stroke="%3$s" stroke-dasharray="%4$s %5$s" transform="rotate(-90 100 100)"/>'
-		. '<text class="wp-yac-donut-pct" x="100" y="98">%1$s%%</text>'
-		. '<text class="wp-yac-donut-sub" x="100" y="122">hit rate</text>'
+		. '<text class="wp-yac-donut-pct" x="100" y="98">%1$s</text>'
+		. '<text class="wp-yac-donut-sub" x="100" y="122">%6$s</text>'
 		. '</svg>',
-		esc_attr( round( $pct, 1 ) ),
+		esc_attr( $label ),
 		$r,
 		esc_attr( $color ),
 		esc_attr( round( $circ * $ratio, 2 ) ),
-		esc_attr( round( $circ, 2 ) )
+		esc_attr( round( $circ, 2 ) ),
+		esc_attr( $sub )
 	);
 }
 
@@ -615,13 +654,15 @@ function wp_yac_render_dashboard_widget() {
 
 	$health = wp_yac_health( $info, wp_yac_memory_snapshot( 10, wp_yac_key_prefix(), 60 ) );
 
-	$colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638' );
+	$colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638', 'warmup' => '#8c8f94' );
 	$color  = $colors[ $health['verdict'] ];
-	$chips  = array( 'green' => '✓ Healthy', 'yellow' => '⚠ Attention', 'red' => '✗ Critical' );
+	$chips  = array( 'green' => '✓ Healthy', 'yellow' => '⚠ Attention', 'red' => '✗ Critical', 'warmup' => '… Warming up' );
 
-	$ratio = max( 0, min( 1, $health['rate'] / 100 ) );
-	$r     = 45;
-	$circ  = 2 * M_PI * $r;
+	$warmup     = 'warmup' === $health['verdict'];
+	$ring_label = $warmup ? 'N/A' : round( $health['rate'], 1 ) . '%';
+	$ratio      = $warmup ? 0 : max( 0, min( 1, $health['rate'] / 100 ) );
+	$r          = 45;
+	$circ       = 2 * M_PI * $r;
 
 	$keys_total   = (int) $info['slots_size'];
 	$keys_used    = (int) $info['slots_used'];
@@ -629,13 +670,13 @@ function wp_yac_render_dashboard_widget() {
 	?>
 	<div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
 		<div style="display: flex; flex-direction: column; align-items: center;">
-			<svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="<?php echo esc_attr( round( $health['rate'], 1 ) ); ?>%">
+			<svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="<?php echo esc_attr( $ring_label ); ?>">
 				<circle cx="60" cy="60" r="<?php echo esc_attr( $r ); ?>" stroke="#f0f0f1" stroke-width="12" fill="none"/>
 				<circle cx="60" cy="60" r="<?php echo esc_attr( $r ); ?>" stroke="<?php echo esc_attr( $color ); ?>" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="<?php echo esc_attr( round( $circ * $ratio, 2 ) ); ?> <?php echo esc_attr( round( $circ, 2 ) ); ?>" transform="rotate(-90 60 60)"/>
-				<text x="60" y="58" font-size="21" font-weight="600" fill="#1d2327" text-anchor="middle"><?php echo esc_html( round( $health['rate'], 1 ) ); ?>%</text>
-				<text x="60" y="76" font-size="10" fill="#646970" text-anchor="middle">hit rate</text>
+				<text x="60" y="58" font-size="21" font-weight="600" fill="#1d2327" text-anchor="middle"><?php echo esc_html( $ring_label ); ?></text>
+				<text x="60" y="76" font-size="10" fill="#646970" text-anchor="middle"><?php echo esc_html( $warmup ? 'warming up' : 'hit rate' ); ?></text>
 			</svg>
-			<div style="margin-top: 6px; border-radius: 20px; padding: 3px 12px; font-size: 12px; font-weight: 600; color: <?php echo esc_attr( $color ); ?>; background: <?php echo 'green' === $health['verdict'] ? '#edfaef' : ( 'yellow' === $health['verdict'] ? '#fcf9e8' : '#fcf0f1' ); ?>;"><?php echo esc_html( $chips[ $health['verdict'] ] ); ?></div>
+			<div style="margin-top: 6px; border-radius: 20px; padding: 3px 12px; font-size: 12px; font-weight: 600; color: <?php echo esc_attr( $color ); ?>; background: <?php echo 'green' === $health['verdict'] ? '#edfaef' : ( 'yellow' === $health['verdict'] ? '#fcf9e8' : ( 'warmup' === $health['verdict'] ? '#f0f0f1' : '#fcf0f1' ) ); ?>;"><?php echo esc_html( $chips[ $health['verdict'] ] ); ?></div>
 		</div>
 		<div style="flex: 1; min-width: 220px; font-size: 13px; color: #50575e;">
 			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Keys' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( $keys_used ) . ' / ' . number_format_i18n( $keys_total ) ); ?></strong></div>
@@ -744,6 +785,82 @@ function wp_yac_ajax_dismiss_status_notice() {
 
 	update_user_meta( get_current_user_id(), 'wp_yac_notice_dismissed', md5( implode( "\n", $errors ) ) );
 	wp_send_json_success();
+}
+
+/* entry inspector: per-entry metadata from Yac::dump(), the deserialized
+   value via get(). atime only exists in newer yac builds — detected at
+   runtime, shown as unavailable otherwise. ttl is an absolute expiry
+   timestamp in every build (0 = never). */
+function wp_yac_entry_detail( $yac, $key ) {
+	$meta = null;
+	$dump = $yac->dump( -1 );
+	if ( is_array( $dump ) ) {
+		foreach ( $dump as $it ) {
+			if ( isset( $it['key'] ) && $it['key'] === $key ) {
+				$meta = $it;
+				break;
+			}
+		}
+	}
+
+	$value = $yac->get( $key );
+	if ( is_array( $value ) && 1 === count( $value ) && array_key_exists( 'v', $value ) ) {
+		$value = $value['v']; // unwrap the drop-in's miss-vs-false wrapper
+	}
+
+	$content = is_string( $value ) ? $value : json_encode( $value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+	if ( ! is_string( $content ) ) {
+		$content = print_r( $value, true );
+	}
+	$len       = strlen( $content );
+	$truncated = $len > 131072;
+	if ( $truncated ) {
+		$content = substr( $content, 0, 131072 );
+	}
+
+	return array(
+		'key'         => $key,
+		'v_len'       => $meta ? wp_yac_format_bytes( $meta['v_len'] ) : '—',
+		'size'        => $meta ? wp_yac_format_bytes( $meta['size'] ) : '—',
+		'ttl'         => $meta ? (int) $meta['ttl'] : 0,
+		'atime'       => ( $meta && array_key_exists( 'atime', $meta ) ) ? (int) $meta['atime'] : null,
+		'gone'        => false === $value,
+		'content'     => $content,
+		'content_len' => $len,
+		'truncated'   => $truncated,
+	);
+}
+
+function wp_yac_entry_delete( $yac, $key ) {
+	return (bool) $yac->delete( $key );
+}
+
+function wp_yac_ajax_entry() {
+	check_ajax_referer( 'wp_yac_entry' );
+
+	if ( ! current_user_can( 'manage_options' ) || ! wp_yac_backend_usable() ) {
+		wp_send_json_error();
+	}
+	$key = isset( $_POST['key'] ) ? sanitize_text_field( wp_unslash( $_POST['key'] ) ) : '';
+	if ( '' === $key ) {
+		wp_send_json_error();
+	}
+
+	wp_send_json_success( wp_yac_entry_detail( new Yac(), $key ) );
+}
+
+function wp_yac_ajax_entry_delete() {
+	check_ajax_referer( 'wp_yac_entry' );
+
+	if ( ! current_user_can( 'manage_options' ) || ! wp_yac_backend_usable() ) {
+		wp_send_json_error();
+	}
+	$key = isset( $_POST['key'] ) ? sanitize_text_field( wp_unslash( $_POST['key'] ) ) : '';
+	if ( '' === $key ) {
+		wp_send_json_error();
+	}
+
+	wp_send_json_success( array( 'deleted' => wp_yac_entry_delete( new Yac(), $key ) ) );
 }
 
 /* flush / redeploy / remove via admin-post */
@@ -857,6 +974,20 @@ function wp_yac_render_admin_page() {
 		.wp-yac-contents-left .wp-yac-pie-legend { flex: none; width: 100%; max-width: 300px; margin-top: 12px; }
 		.wp-yac-contents-right { flex: 1 1 480px; min-width: 320px; }
 		.wp-yac-entry-bars-lg li { font-size: 13px; padding: 5px 0; }
+		button.wp-yac-entry-inspect { width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; font-family: Consolas, Monaco, monospace; font-size: 12px; color: #2271b1; background: none; border: 0; padding: 0; margin: 0; text-align: left; cursor: pointer; }
+		button.wp-yac-entry-inspect:hover { color: #135e96; text-decoration: underline; }
+		.wp-yac-entry-bars-lg button.wp-yac-entry-inspect { font-size: 13px; }
+		.wp-yac-modal-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 99999; display: flex; align-items: center; justify-content: center; }
+		.wp-yac-modal-mask[hidden] { display: none; }
+		.wp-yac-modal { background: #fff; border: 1px solid #dcdcde; border-radius: 8px; width: min(760px, 94vw); max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0, 0, 0, .18); }
+		.wp-yac-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; border-bottom: 1px solid #f0f0f1; }
+		.wp-yac-modal-head code { font-size: 13px; color: #1d2327; word-break: break-all; font-family: Consolas, Monaco, monospace; }
+		.wp-yac-modal-x { border: 0; background: none; font-size: 20px; line-height: 1; cursor: pointer; color: #646970; padding: 4px 8px; border-radius: 4px; }
+		.wp-yac-modal-x:hover { color: #1d2327; background: #f0f0f1; }
+		.wp-yac-modal .wp-yac-op-list { margin: 0; padding: 4px 16px 0; }
+		.wp-yac-modal-sub { margin: 14px 16px 0; padding: 0; font-size: 13px; font-weight: 600; color: #1d2327; }
+		.wp-yac-modal-pre { margin: 6px 16px 12px; padding: 10px 12px; background: #f6f7f7; border: 1px solid #f0f0f1; border-radius: 6px; overflow: auto; max-height: 46vh; font-family: Consolas, Monaco, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+		.wp-yac-modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #f0f0f1; background: #f6f7f7; border-radius: 0 0 8px 8px; }
 		.wp-yac-entry-bars-lg .wp-yac-entry-key { width: 300px; }
 		.wp-yac-entry-bars-lg .wp-yac-entry-bar-track { height: 14px; }
 		.wp-yac-entry-bars-lg strong { width: 90px; }
@@ -879,7 +1010,9 @@ function wp_yac_render_admin_page() {
 		.wp-yac-chip-good { background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; }
 		.wp-yac-chip-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
 		.wp-yac-chip-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
+		.wp-yac-chip-warmup { background: #f0f0f1; border: 1px solid #dcdcde; color: #50575e; }
 		.wp-yac-advice-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
+		.wp-yac-advice-info { background: #f6f7f7; border: 1px solid #dcdcde; color: #50575e; }
 	</style>
 	<div class="wrap wp-yac-wrap">
 		<h1><?php echo esc_html( 'Yac Object Cache' ); ?></h1>
@@ -930,7 +1063,7 @@ function wp_yac_render_admin_page() {
 			$snapshot = wp_yac_memory_snapshot( 10, wp_yac_key_prefix() );
 			$health   = wp_yac_health( $info, $snapshot );
 
-			$health_colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638' );
+			$health_colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638', 'warmup' => '#8c8f94' );
 			$health_color  = $health_colors[ $health['verdict'] ];
 
 			$keys_used    = (int) $info['slots_used'];
@@ -947,19 +1080,21 @@ function wp_yac_render_admin_page() {
 			$ops_total = $lookups + $fails;
 
 			/* one bar row; color = verdict color when the metric is a
-			   cause of the verdict, green otherwise */
+			   cause of the verdict, green otherwise (neutral gray while
+			   the cache is still warming up and nothing is judged) */
 			$wp_yac_bar = function ( $label, $width, $color, $value_html ) {
 				return '<li><span class="lbl">' . esc_html( $label ) . '</span>'
 					. '<span class="track"><span class="fill" style="width: ' . esc_attr( round( min( 100, max( 0, $width ) ), 1 ) ) . '%; background: ' . esc_attr( $color ) . '"></span></span>'
 					. '<span class="val">' . $value_html . '</span></li>';
 			};
-			$wp_yac_cause = function ( $key ) use ( $health, $health_color ) {
-				return in_array( $key, $health['causes'], true ) ? $health_color : '#00a32a';
+			$wp_yac_idle  = 'warmup' === $health['verdict'] ? '#8c8f94' : '#00a32a';
+			$wp_yac_cause = function ( $key ) use ( $health, $health_color, $wp_yac_idle ) {
+				return in_array( $key, $health['causes'], true ) ? $health_color : $wp_yac_idle;
 			};
 
 			$wp_yac_bars  = $wp_yac_bar( 'Keys', $health['keys_pct'], $wp_yac_cause( 'keys' ), number_format_i18n( $keys_used ) . ' <small>/ ' . number_format_i18n( $keys_total ) . '</small>' );
 			$wp_yac_bars .= $wp_yac_bar( 'Values', $health['vals_pct'], $wp_yac_cause( 'values' ), esc_html( wp_yac_format_bytes( $occupied ) ) . ' <small>/ ' . esc_html( wp_yac_format_bytes( $values_total ) ) . '</small>' );
-			$wp_yac_bars .= $wp_yac_bar( 'Hits', $lookups > 0 ? $hits / $lookups * 100 : 0, '#00a32a', number_format_i18n( $hits ) );
+			$wp_yac_bars .= $wp_yac_bar( 'Hits', $lookups > 0 ? $hits / $lookups * 100 : 0, $wp_yac_idle, number_format_i18n( $hits ) );
 			$wp_yac_bars .= $wp_yac_bar( 'Misses', $lookups > 0 ? $misses / $lookups * 100 : 0, $wp_yac_cause( 'misses' ), number_format_i18n( $misses ) );
 			$wp_yac_bars .= $wp_yac_bar( 'Kicks', $kicks / max( 1, $ops_total ) * 100, $wp_yac_cause( 'kicks' ), number_format_i18n( $kicks ) . ( $kicks > 0 && $misses > 0 ? ' <small>(≈' . round( $kicks / $misses * 100 ) . '% of misses)</small>' : '' ) );
 			$wp_yac_bars .= $wp_yac_bar( 'Recycles', $recycles / max( 1, $ops_total ) * 100, $wp_yac_cause( 'recycles' ), number_format_i18n( $recycles ) );
@@ -968,6 +1103,7 @@ function wp_yac_render_admin_page() {
 				'green'  => array( 'wp-yac-chip-good', '✓ Healthy' ),
 				'yellow' => array( 'wp-yac-chip-warn', '⚠ Attention' ),
 				'red'    => array( 'wp-yac-chip-err', '✗ Critical' ),
+				'warmup' => array( 'wp-yac-chip-warmup', '… Warming up' ),
 			);
 			$wp_yac_chip = $wp_yac_chips[ $health['verdict'] ];
 
@@ -986,7 +1122,9 @@ function wp_yac_render_admin_page() {
 			<div class="wp-yac-panel">
 				<div class="wp-yac-health">
 					<div class="wp-yac-health-ring">
-						<?php echo wp_yac_health_donut( $health['rate'], $health_color ); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+						<?php echo 'warmup' === $health['verdict']
+							? wp_yac_health_donut( 0, $health_color, 'N/A', 'warming up' )
+							: wp_yac_health_donut( $health['rate'], $health_color ); // phpcs:ignore WordPress.Security.EscapeOutput ?>
 						<span class="wp-yac-chip <?php echo esc_attr( $wp_yac_chip[0] ); ?>"><?php echo esc_html( $wp_yac_chip[1] ); ?></span>
 					</div>
 					<div class="wp-yac-health-bars">
@@ -994,7 +1132,12 @@ function wp_yac_render_admin_page() {
 						<p class="wp-yac-note"><?php echo esc_html( 'Values bar = Σ entry.size (padded). All bars green when healthy; only the causing metrics take the verdict color.' ); ?></p>
 					</div>
 				</div>
-				<?php if ( '' !== $health['advice'] ) : ?>
+				<?php if ( 'warmup' === $health['verdict'] ) : ?>
+					<div class="wp-yac-advice wp-yac-advice-info">
+						<span>…</span>
+						<div><?php echo esc_html( sprintf( 'Warming up — the cache just started and early lookups are compulsory first reads, so no verdict yet. Health metrics start after the first %s lookups (%s so far).', number_format_i18n( WP_YAC_WARMUP_LOOKUPS ), number_format_i18n( $health['lookups'] ) ) ); ?></div>
+					</div>
+				<?php elseif ( '' !== $health['advice'] ) : ?>
 					<?php $wp_yac_advice = $wp_yac_advices[ $health['advice'] ]; ?>
 					<div class="wp-yac-advice <?php echo esc_attr( $wp_yac_advice[0] ); ?>">
 						<span><?php echo esc_html( $wp_yac_advice[1] ); ?></span>
@@ -1043,7 +1186,7 @@ function wp_yac_render_admin_page() {
 								<ul class="wp-yac-entry-bars wp-yac-entry-bars-lg">
 								<?php foreach ( $snapshot['largest'] as $entry ) : ?>
 									<li>
-										<span class="wp-yac-entry-key" title="<?php echo esc_attr( $entry[2] ); ?>"><?php echo esc_html( $entry[2] ); ?></span>
+										<button type="button" class="wp-yac-entry-inspect" data-key="<?php echo esc_attr( $entry[2] ); ?>" title="<?php echo esc_attr( $entry[2] ); ?>"><?php echo esc_html( $entry[2] ); ?></button>
 										<span class="wp-yac-entry-bar-track"><span class="wp-yac-entry-bar" style="width: <?php echo esc_attr( round( $entry[0] / $largest_size * 100 ) ); ?>%"></span></span>
 										<strong><?php echo esc_html( wp_yac_format_bytes( $entry[0] ) ); ?></strong>
 									</li>
@@ -1194,6 +1337,115 @@ function wp_yac_render_admin_page() {
 				</form>
 			<?php endif; ?>
 		</div>
+
+		<div class="wp-yac-modal-mask" id="wp-yac-modal" hidden>
+			<div class="wp-yac-modal" role="dialog" aria-modal="true">
+				<div class="wp-yac-modal-head">
+					<code id="wp-yac-modal-key"></code>
+					<button type="button" class="wp-yac-modal-x" data-wp-yac-close aria-label="Close">×</button>
+				</div>
+				<ul class="wp-yac-op-list" id="wp-yac-modal-meta"></ul>
+				<h3 class="wp-yac-modal-sub"><?php echo esc_html( 'Deserialized value' ); ?></h3>
+				<pre class="wp-yac-modal-pre" id="wp-yac-modal-body"></pre>
+				<div class="wp-yac-modal-foot">
+					<button type="button" class="button button-link-delete" id="wp-yac-modal-delete"><?php echo esc_html( 'Delete this entry' ); ?></button>
+					<button type="button" class="button" data-wp-yac-close><?php echo esc_html( 'Close' ); ?></button>
+				</div>
+			</div>
+		</div>
+		<script>
+		( function() {
+			var mask = document.getElementById( 'wp-yac-modal' ),
+				keyEl  = document.getElementById( 'wp-yac-modal-key' ),
+				metaEl = document.getElementById( 'wp-yac-modal-meta' ),
+				bodyEl = document.getElementById( 'wp-yac-modal-body' ),
+				delEl  = document.getElementById( 'wp-yac-modal-delete' ),
+				ajaxurl = '<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>',
+				nonce   = '<?php echo esc_js( wp_create_nonce( 'wp_yac_entry' ) ); ?>',
+				cur = null, curRow = null;
+
+			function esc( s ) {
+				var d = document.createElement( 'div' );
+				d.textContent = s == null ? '' : String( s );
+				return d.innerHTML;
+			}
+			function rel( s ) {
+				var diff = Math.round( Date.now() / 1000 - s ), a = Math.abs( diff ), u;
+				u = a >= 172800 ? Math.round( a / 86400 ) + 'd' : ( a >= 7200 ? Math.round( a / 3600 ) + 'h' : ( a >= 120 ? Math.round( a / 60 ) + 'm' : a + 's' ) );
+				return diff >= 0 ? u + ' ago' : 'in ' + u;
+			}
+			function epoch( s ) {
+				return new Date( s * 1000 ).toLocaleString() + ' (' + rel( s ) + ')';
+			}
+			function send( action, cb ) {
+				var xhr = new XMLHttpRequest();
+				xhr.open( 'POST', ajaxurl );
+				xhr.setRequestHeader( 'Content-Type', 'application/x-www-form-urlencoded' );
+				xhr.onload = function() {
+					var res;
+					try { res = JSON.parse( xhr.responseText ); } catch ( e ) { res = { success: false }; }
+					cb( res );
+				};
+				xhr.send( 'action=' + action + '&key=' + encodeURIComponent( cur ) + '&_wpnonce=' + encodeURIComponent( nonce ) );
+			}
+			function close() {
+				mask.hidden = true;
+				cur = null;
+				curRow = null;
+			}
+			function open( key, row ) {
+				cur = key;
+				curRow = row;
+				keyEl.textContent = key;
+				metaEl.innerHTML = '<li><span>Loading…</span><strong></strong></li>';
+				bodyEl.textContent = '';
+				mask.hidden = false;
+				send( 'wp_yac_entry', function( res ) {
+					if ( ! res.success || ! res.data ) {
+						metaEl.innerHTML = '<li><span>Could not load the entry.</span><strong></strong></li>';
+						return;
+					}
+					var d = res.data,
+						rows = [
+							'<li><span>Content (v_len)</span><strong>' + esc( d.v_len ) + '</strong></li>',
+							'<li><span>Occupied (padded)</span><strong>' + esc( d.size ) + '</strong></li>',
+							'<li><span>Expires</span><strong>' + ( d.ttl ? esc( epoch( d.ttl ) ) : 'never' ) + '</strong></li>'
+						];
+					if ( d.atime ) {
+						rows.push( '<li><span>Last access</span><strong>' + esc( epoch( d.atime ) ) + '</strong></li>' );
+					}
+					metaEl.innerHTML = rows.join( '' );
+					if ( d.gone ) {
+						bodyEl.textContent = '(the entry is gone — evicted or expired between the page render and now)';
+					} else {
+						bodyEl.textContent = d.content + ( d.truncated ? '\n… truncated, full content is ' + d.content_len + ' bytes' : '' );
+					}
+				} );
+			}
+
+			document.addEventListener( 'click', function( e ) {
+				var t = e.target.closest ? e.target.closest( '.wp-yac-entry-inspect' ) : null;
+				if ( t ) {
+					open( t.getAttribute( 'data-key' ), t.closest( 'li' ) );
+					return;
+				}
+				if ( e.target === mask || ( e.target.closest && e.target.closest( '[data-wp-yac-close]' ) ) ) {
+					close();
+				}
+			} );
+			delEl.addEventListener( 'click', function() {
+				if ( ! cur ) {
+					return;
+				}
+				send( 'wp_yac_entry_delete', function( res ) {
+					if ( res.success && res.data && res.data.deleted && curRow && curRow.parentNode ) {
+						curRow.parentNode.removeChild( curRow );
+					}
+					close();
+				} );
+			} );
+		} )();
+		</script>
 	</div>
 	<?php
 }

@@ -59,6 +59,7 @@ function esc_js( $s ) { return $s; }
 function number_format_i18n( $n, $dec = 0 ) { return number_format( $n, $dec ); }
 function admin_url( $path = '' ) { return 'https://example.test/wp-admin/' . ltrim( $path, '/' ); }
 function wp_nonce_field( $action = -1 ) { echo '<input type="hidden" name="_wpnonce" value="x">'; }
+function wp_create_nonce( $action = -1 ) { return 'x'; }
 function wp_cache_supports( $feature ) { return 'get_multiple' === $feature; }
 function size_format( $bytes, $dec = 0 ) { return round( $bytes / 1024, $dec ) . ' KB'; }
 function apply_filters( $hook, $value ) { return $value; }
@@ -132,12 +133,50 @@ check( 'configuration rendered as table', strpos( $html, 'wp-yac-config-table' )
 check( 'config table lists directives', strpos( $html, 'yac.keys_memory_size' ) !== false );
 check( 'legacy counters panel removed', strpos( $html, '>Counters<' ) === false );
 check( 'memory contents panel rendered', strpos( $html, 'Shared memory contents' ) !== false );
+check( 'largest keys are clickable', strpos( $html, 'wp-yac-entry-inspect' ) !== false && strpos( $html, 'data-key="wp_x:options:alloptions"' ) !== false );
+check( 'entry inspector modal rendered', strpos( $html, 'wp-yac-modal' ) !== false );
 check( 'occupied metric uses padded size', strpos( $html, 'Occupied' ) !== false );
 check( 'group pie rendered', strpos( $html, 'wp-yac-pie' ) !== false );
 check( 'config lists wp-config directives first', strpos( $html, 'WP_CACHE' ) < strpos( $html, 'yac.enable' ) );
 check( 'legacy card row removed', strpos( $html, 'class="wp-yac-cards' ) === false );
 check( 'legacy values-health panel removed', strpos( $html, 'Values memory health' ) === false );
 check( 'legacy recycle scare removed', strpos( $html, 'Memory pressure' ) === false );
+
+// --- Scenario 1b: cold cache — warm-up state, no verdict ---------------------
+
+$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+	'slots_used' => 120,
+	'hits'       => 600,
+	'miss'       => 300,
+) );
+$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot( array( 'entries' => 120, 'own' => 120 ) );
+
+$html = render_page();
+
+check( 'warm-up donut shows N/A', strpos( $html, '>N/A<' ) !== false );
+check( 'warm-up donut sub caption', strpos( $html, '>warming up<' ) !== false );
+check( 'warm-up chip shown', strpos( $html, 'Warming up' ) !== false );
+check( 'warm-up explains the threshold', strpos( $html, 'Warming up — the cache just started' ) !== false );
+check( 'warm-up shows lookups progress', strpos( $html, '(900 so far)' ) !== false );
+check( 'warm-up renders no colored verdict advice', strpos( $html, 'class="wp-yac-advice-warn' ) === false && strpos( $html, 'class="wp-yac-advice-err' ) === false );
+check( 'warm-up bars stay neutral', strpos( $html, 'background: #8c8f94' ) !== false );
+
+ob_start();
+wp_yac_render_dashboard_widget();
+$widget_warm = ob_get_clean();
+check( 'widget shows N/A while warming up', strpos( $widget_warm, '>N/A<' ) !== false && strpos( $widget_warm, 'warming up' ) !== false );
+
+// --- Scenario 1c: warm-up threshold reached — the verdict starts --------------
+
+$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+	'slots_used' => 120,
+	'hits'       => 950,
+	'miss'       => 50,
+) );
+
+$html = render_page();
+
+check( 'verdict starts once the threshold is reached', strpos( $html, '95%' ) !== false && strpos( $html, 'Healthy' ) !== false );
 
 // --- Scenario 2: keys full, hit rate 80% — yellow keys advice ------------------
 
@@ -280,6 +319,53 @@ wp_yac_render_dashboard_widget();
 $widget_html = ob_get_clean();
 check( 'dashboard widget renders hit rate', strpos( $widget_html, 'hit rate' ) !== false );
 check( 'dashboard widget links to full dashboard', strpos( $widget_html, 'Full dashboard' ) !== false );
+
+// --- Entry inspector --------------------------------------------------------
+
+class Fake_Yac {
+	public $store = array();
+	public function dump( $limit = 100 ) {
+		$out = array();
+		foreach ( $this->store as $k => $m ) {
+			$m['key'] = $k;
+			$out[]    = $m;
+		}
+		return $out;
+	}
+	public function get( $k ) {
+		return isset( $this->store[ $k ] ) ? $this->store[ $k ]['value'] : false;
+	}
+	public function delete( $k ) {
+		if ( isset( $this->store[ $k ] ) ) {
+			unset( $this->store[ $k ] );
+			return true;
+		}
+		return false;
+	}
+}
+
+$fake = new Fake_Yac();
+$fake->store['wp:options:alloptions'] = array(
+	'value' => array( 'v' => array( 'blogname' => 'Test' ) ),
+	'v_len' => 100,
+	'size'  => 128,
+	'ttl'   => 0,
+);
+
+$d = wp_yac_entry_detail( $fake, 'wp:options:alloptions' );
+check( 'inspector unwraps drop-in v wrapper', strpos( $d['content'], '"blogname": "Test"' ) !== false );
+check( 'inspector reports never-expiring ttl', 0 === $d['ttl'] );
+check( 'inspector reports missing atime as null', null === $d['atime'] );
+check( 'inspector formats sizes', '100 B' === $d['v_len'] || '100 KB' === $d['v_len'] );
+
+$fake->store['wp:options:alloptions']['atime'] = 1234567890;
+$d = wp_yac_entry_detail( $fake, 'wp:options:alloptions' );
+check( 'inspector passes atime through when the build has it', 1234567890 === $d['atime'] );
+
+$d = wp_yac_entry_detail( $fake, 'wp:nope' );
+check( 'inspector reports gone entry', $d['gone'] );
+
+check( 'inspector delete removes the entry', wp_yac_entry_delete( $fake, 'wp:options:alloptions' ) && ! isset( $fake->store['wp:options:alloptions'] ) );
 
 // --- Dump for visual inspection ------------------------------------------------
 
