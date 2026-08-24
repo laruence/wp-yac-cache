@@ -633,13 +633,16 @@ function wp_yac_admin_menu() {
 
 function wp_yac_admin_enqueue_scripts( $hook ) {
 	$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-	/* dashboard widget + every admin notice share these two pieces of data */
+	wp_enqueue_script( 'wp-yac-notice', WP_YAC_PLUGIN_URL . 'assets/wp-yac-notice.js', array(), WP_YAC_VERSION, true );
+
+	/* dashboard widget + every admin notice share these two pieces of data;
+	   localize must run after the script is registered/enqueued, otherwise
+	   WP silently drops the inline data */
 	wp_localize_script( 'wp-yac-notice', 'WP_YAC_CONFIG', array(
 		'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
 		'noticeNonce' => wp_create_nonce( 'wp_yac_dismiss_notice' ),
 		'entryNonce'  => wp_create_nonce( 'wp_yac_entry' ),
 	) );
-	wp_enqueue_script( 'wp-yac-notice', WP_YAC_PLUGIN_URL . 'assets/wp-yac-notice.js', array(), WP_YAC_VERSION, true );
 
 	if ( $screen && false !== strpos( $screen->id, WP_YAC_ADMIN_PAGE ) ) {
 		wp_enqueue_style( 'wp-yac-admin', WP_YAC_PLUGIN_URL . 'assets/wp-yac.css', array(), WP_YAC_VERSION );
