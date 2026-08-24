@@ -18,6 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 define( 'WP_YAC_VERSION', '1.1.0' );
 define( 'WP_YAC_PLUGIN_FILE', __FILE__ );
+define( 'WP_YAC_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'WP_YAC_DROPIN_SOURCE', __DIR__ . '/object-cache.php' );
 define( 'WP_YAC_DROPIN_DEST', WP_CONTENT_DIR . '/object-cache.php' );
 define( 'WP_YAC_ADMIN_PAGE', 'wp-yac' );
@@ -40,6 +41,8 @@ add_action( 'debug_information', 'wp_yac_site_health_info' );
 add_action( 'wp_ajax_wp_yac_dismiss_status_notice', 'wp_yac_ajax_dismiss_status_notice' );
 add_action( 'wp_ajax_wp_yac_entry', 'wp_yac_ajax_entry' );
 add_action( 'wp_ajax_wp_yac_entry_delete', 'wp_yac_ajax_entry_delete' );
+add_action( 'admin_enqueue_scripts', 'wp_yac_admin_enqueue_scripts' );
+add_action( 'admin_print_footer_scripts', 'wp_yac_admin_notice_script' );
 
 /* the uninstall hook cannot live in the drop-in */
 if ( is_admin() ) {
@@ -85,10 +88,6 @@ function wp_yac_deploy_dropin( $force = false ) {
 	if ( ! is_readable( WP_YAC_DROPIN_SOURCE ) ) {
 		update_option( 'wp_yac_dropin_deployed', '', true );
 		return false;
-	}
-
-	if ( ! defined( 'FS_CHMOD_FILE' ) ) {
-		define( 'FS_CHMOD_FILE', ( fileperms( ABSPATH . 'index.php' ) & 0777 | 0644 ) );
 	}
 
 	$content = file_get_contents( WP_YAC_DROPIN_SOURCE );
@@ -632,6 +631,33 @@ function wp_yac_admin_menu() {
 	);
 }
 
+function wp_yac_admin_enqueue_scripts( $hook ) {
+	$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+	/* dashboard widget + every admin notice share these two pieces of data */
+	wp_localize_script( 'wp-yac-notice', 'WP_YAC_CONFIG', array(
+		'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
+		'noticeNonce' => wp_create_nonce( 'wp_yac_dismiss_notice' ),
+		'entryNonce'  => wp_create_nonce( 'wp_yac_entry' ),
+	) );
+	wp_enqueue_script( 'wp-yac-notice', WP_YAC_PLUGIN_URL . 'assets/wp-yac-notice.js', array(), WP_YAC_VERSION, true );
+
+	if ( $screen && false !== strpos( $screen->id, WP_YAC_ADMIN_PAGE ) ) {
+		wp_enqueue_style( 'wp-yac-admin', WP_YAC_PLUGIN_URL . 'assets/wp-yac.css', array(), WP_YAC_VERSION );
+		wp_enqueue_script( 'wp-yac-admin', WP_YAC_PLUGIN_URL . 'assets/wp-yac-admin.js', array(), WP_YAC_VERSION, true );
+	}
+}
+
+/* the notice is rendered by admin_notices (priority 10), after
+   admin_enqueue_scripts has fired, so the deferred enqueue of the
+   dismiss script registers the file at print time instead */
+function wp_yac_admin_notice_script() {
+	if ( ! wp_yac_show_status_notice() ) {
+		return;
+	}
+	wp_enqueue_script( 'wp-yac-notice', WP_YAC_PLUGIN_URL . 'assets/wp-yac-notice.js', array(), WP_YAC_VERSION, true );
+	wp_print_scripts( 'wp-yac-notice' );
+}
+
 /* compact health summary on the WP admin dashboard; the snapshot is
    shared-memory cached for 60s so the frequent dashboard loads do not
    re-walk the slot table */
@@ -720,10 +746,10 @@ function wp_yac_admin_notices() {
 
 /* one combined dismissible notice for error-level status rows; kept off the
    plugin's own page (that page shows the same diagnostics in full) */
-function wp_yac_status_notice() {
+function wp_yac_show_status_notice() {
 	$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 	if ( $screen && false !== strpos( $screen->id, WP_YAC_ADMIN_PAGE ) ) {
-		return;
+		return false;
 	}
 
 	$errors = array();
@@ -734,36 +760,33 @@ function wp_yac_status_notice() {
 	}
 
 	if ( ! $errors ) {
-		return;
+		return false;
 	}
 
 	/* the dismissal sticks to this exact set of errors: a different
 	   fingerprint means the situation changed, so show it again */
-	$fingerprint = md5( implode( "\n", $errors ) );
-	if ( get_user_meta( get_current_user_id(), 'wp_yac_notice_dismissed', true ) === $fingerprint ) {
+	if ( get_user_meta( get_current_user_id(), 'wp_yac_notice_dismissed', true ) === md5( implode( "\n", $errors ) ) ) {
+		return false;
+	}
+
+	return true;
+}
+
+function wp_yac_status_notice() {
+	if ( ! wp_yac_show_status_notice() ) {
 		return;
+	}
+
+	$errors = array();
+	foreach ( wp_yac_status() as $row ) {
+		if ( 'err' === $row[1] ) {
+			$errors[] = $row[2];
+		}
 	}
 
 	echo '<div class="notice notice-error is-dismissible" id="wp-yac-status-notice"><p><strong>' . esc_html( 'Yac:' ) . '</strong> ' . wp_kses_post( implode( '<br>', $errors ) ) . '</p>'
 		. '<p><a href="' . esc_url( admin_url( 'tools.php?page=' . WP_YAC_ADMIN_PAGE ) ) . '">' . esc_html( 'Open the status page for details and fixes' ) . '</a></p>'
 		. '</div>';
-
-	?>
-	<script>
-	( function() {
-		var notice = document.getElementById( 'wp-yac-status-notice' );
-		if ( ! notice ) {
-			return;
-		}
-		notice.querySelector( '.notice-dismiss' ).addEventListener( 'click', function() {
-			var xhr = new XMLHttpRequest();
-			xhr.open( 'POST', '<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>' );
-			xhr.setRequestHeader( 'Content-Type', 'application/x-www-form-urlencoded' );
-			xhr.send( 'action=wp_yac_dismiss_status_notice&_wpnonce=<?php echo esc_js( wp_create_nonce( 'wp_yac_dismiss_notice' ) ); ?>' );
-		} );
-	} )();
-	</script>
-	<?php
 }
 
 /* persist the dismissal; no privilege escalation: only the current user's
@@ -930,90 +953,6 @@ function wp_yac_render_admin_page() {
 		}
 	}
 	?>
-	<style>
-		.wp-yac-wrap { max-width: 1100px; margin-top: 12px; }
-		.wp-yac-grid { display: flex; gap: 14px; flex-wrap: wrap; }
-		.wp-yac-panel { background: #fff; border: 1px solid #dcdcde; border-radius: 8px; padding: 18px 20px; box-shadow: 0 1px 1px rgba(0, 0, 0, .04); }
-		.wp-yac-panel > h2 { margin-top: 0; padding: 0; border: 0; font-size: 15px; }
-		.wp-yac-panel-note { color: #646970; font-size: 12px; margin: -4px 0 12px; }
-		.wp-yac-donut-track { fill: none; stroke: #f0f0f1; stroke-width: 13; }
-		.wp-yac-donut-fill { fill: none; stroke-width: 13; stroke-linecap: round; }
-		.wp-yac-donut-pct { font-size: 22px; font-weight: 600; fill: #1d2327; text-anchor: middle; }
-		.wp-yac-donut-sub { font-size: 9px; fill: #646970; text-anchor: middle; }
-		.wp-yac-advice { display: flex; gap: 10px; border-radius: 8px; padding: 12px 14px; margin: 14px 0 0; font-size: 13px; line-height: 1.6; }
-		.wp-yac-advice-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
-		.wp-yac-advice strong { display: block; }
-		.wp-yac-actions { margin-top: 18px; }
-		.wp-yac-actions form { display: inline-block; margin-right: 8px; }
-		.wp-yac-config-table { width: 100%; border-collapse: collapse; }
-		.wp-yac-config-table th { text-align: left; font-size: 12px; color: #646970; padding: 7px 10px; border-bottom: 1px solid #f0f0f1; }
-		.wp-yac-config-table td { border: 0; padding: 7px 10px; font-size: 13px; }
-		.wp-yac-config-table td code { background: #f0f0f1; padding: 2px 6px; border-radius: 3px; font-size: 12px; white-space: nowrap; }
-		.wp-yac-config-table td:nth-child(3) { white-space: nowrap; }
-		.wp-yac-op-list { list-style: none; margin: 8px 0 0; padding: 0; }
-		.wp-yac-op-list li { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #f0f0f1; font-size: 13px; }
-		.wp-yac-op-list span { color: #646970; }
-		.wp-yac-entry-bars { list-style: none; margin: 8px 0 0; padding: 0; }
-		.wp-yac-entry-bars li { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
-		.wp-yac-entry-key { width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #50575e; flex: none; font-family: Consolas, Monaco, monospace; }
-		.wp-yac-entry-bar-track { flex: 1; background: #f0f0f1; border-radius: 4px; height: 10px; overflow: hidden; }
-		.wp-yac-entry-bar { display: block; height: 100%; background: #72aee6; border-radius: 4px; }
-		.wp-yac-entry-bars strong { width: 76px; text-align: right; flex: none; }
-		.wp-yac-pie-wrap { display: flex; gap: 16px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
-		.wp-yac-pie { width: 140px; height: 140px; flex: none; display: block; }
-		.wp-yac-pie-legend { list-style: none; margin: 0; padding: 0; font-size: 12px; flex: 1 1 200px; }
-		.wp-yac-pie-legend li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-		.wp-yac-pie-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-		.wp-yac-pie-legend .g { flex: 1; color: #50575e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.wp-yac-pie-legend strong { text-align: right; }
-		.wp-yac-pie-legend small { color: #646970; font-weight: 400; }
-		.wp-yac-pie-legend .g small { color: #646970; }
-		.wp-yac-contents { display: flex; gap: 28px; flex-wrap: wrap; align-items: stretch; }
-		.wp-yac-contents-left { flex: 0 0 340px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-		.wp-yac-contents-left .wp-yac-pie { width: 240px; height: 240px; }
-		.wp-yac-contents-left .wp-yac-pie-legend { flex: none; width: 100%; max-width: 300px; margin-top: 12px; }
-		.wp-yac-contents-right { flex: 1 1 480px; min-width: 320px; }
-		.wp-yac-entry-bars-lg li { font-size: 13px; padding: 5px 0; }
-		button.wp-yac-entry-inspect { width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; font-family: Consolas, Monaco, monospace; font-size: 12px; color: #2271b1; background: none; border: 0; padding: 0; margin: 0; text-align: left; cursor: pointer; }
-		button.wp-yac-entry-inspect:hover { color: #135e96; text-decoration: underline; }
-		.wp-yac-entry-bars-lg button.wp-yac-entry-inspect { font-size: 13px; }
-		.wp-yac-modal-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 99999; display: flex; align-items: center; justify-content: center; }
-		.wp-yac-modal-mask[hidden] { display: none; }
-		.wp-yac-modal { background: #fff; border: 1px solid #dcdcde; border-radius: 8px; width: min(760px, 94vw); max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0, 0, 0, .18); }
-		.wp-yac-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; border-bottom: 1px solid #f0f0f1; }
-		.wp-yac-modal-head code { font-size: 13px; color: #1d2327; word-break: break-all; font-family: Consolas, Monaco, monospace; }
-		.wp-yac-modal-x { border: 0; background: none; font-size: 20px; line-height: 1; cursor: pointer; color: #646970; padding: 4px 8px; border-radius: 4px; }
-		.wp-yac-modal-x:hover { color: #1d2327; background: #f0f0f1; }
-		.wp-yac-modal .wp-yac-op-list { margin: 0; padding: 4px 16px 0; }
-		.wp-yac-modal-sub { margin: 14px 16px 0; padding: 0; font-size: 13px; font-weight: 600; color: #1d2327; }
-		.wp-yac-modal-pre { margin: 6px 16px 12px; padding: 10px 12px; background: #f6f7f7; border: 1px solid #f0f0f1; border-radius: 6px; overflow: auto; max-height: 46vh; font-family: Consolas, Monaco, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
-		.wp-yac-modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #f0f0f1; background: #f6f7f7; border-radius: 0 0 8px 8px; }
-		.wp-yac-entry-bars-lg .wp-yac-entry-key { width: 300px; }
-		.wp-yac-entry-bars-lg .wp-yac-entry-bar-track { height: 14px; }
-		.wp-yac-entry-bars-lg strong { width: 90px; }
-		.wp-yac-note { color: #646970; font-size: 12px; margin-top: 8px; }
-		.wp-yac-health { display: flex; gap: 28px; flex-wrap: wrap; align-items: center; }
-		.wp-yac-health-ring { flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; }
-		.wp-yac-health-donut { width: 200px; height: 200px; display: block; }
-		.wp-yac-health-donut .wp-yac-donut-track, .wp-yac-health-donut .wp-yac-donut-fill { stroke-width: 18; }
-		.wp-yac-health-donut .wp-yac-donut-pct { font-size: 34px; }
-		.wp-yac-health-donut .wp-yac-donut-sub { font-size: 13px; }
-		.wp-yac-health-bars { flex: 1 1 420px; }
-		.wp-yac-bars { list-style: none; margin: 0; padding: 0; }
-		.wp-yac-bars li { display: grid; grid-template-columns: 86px 1fr 150px; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; }
-		.wp-yac-bars .lbl { color: #50575e; }
-		.wp-yac-bars .track { background: #f0f0f1; border-radius: 6px; height: 13px; overflow: hidden; }
-		.wp-yac-bars .fill { display: block; height: 100%; border-radius: 6px; }
-		.wp-yac-bars .val { text-align: right; font-weight: 600; color: #1d2327; }
-		.wp-yac-bars .val small { font-weight: 400; color: #646970; }
-		.wp-yac-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 600; margin-top: 12px; }
-		.wp-yac-chip-good { background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; }
-		.wp-yac-chip-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
-		.wp-yac-chip-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
-		.wp-yac-chip-warmup { background: #f0f0f1; border: 1px solid #dcdcde; color: #50575e; }
-		.wp-yac-advice-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
-		.wp-yac-advice-info { background: #f6f7f7; border: 1px solid #dcdcde; color: #50575e; }
-	</style>
 	<div class="wrap wp-yac-wrap">
 		<h1><?php echo esc_html( 'Yac Object Cache' ); ?></h1>
 
@@ -1353,99 +1292,6 @@ function wp_yac_render_admin_page() {
 				</div>
 			</div>
 		</div>
-		<script>
-		( function() {
-			var mask = document.getElementById( 'wp-yac-modal' ),
-				keyEl  = document.getElementById( 'wp-yac-modal-key' ),
-				metaEl = document.getElementById( 'wp-yac-modal-meta' ),
-				bodyEl = document.getElementById( 'wp-yac-modal-body' ),
-				delEl  = document.getElementById( 'wp-yac-modal-delete' ),
-				ajaxurl = '<?php echo esc_js( admin_url( 'admin-ajax.php' ) ); ?>',
-				nonce   = '<?php echo esc_js( wp_create_nonce( 'wp_yac_entry' ) ); ?>',
-				cur = null, curRow = null;
-
-			function esc( s ) {
-				var d = document.createElement( 'div' );
-				d.textContent = s == null ? '' : String( s );
-				return d.innerHTML;
-			}
-			function rel( s ) {
-				var diff = Math.round( Date.now() / 1000 - s ), a = Math.abs( diff ), u;
-				u = a >= 172800 ? Math.round( a / 86400 ) + 'd' : ( a >= 7200 ? Math.round( a / 3600 ) + 'h' : ( a >= 120 ? Math.round( a / 60 ) + 'm' : a + 's' ) );
-				return diff >= 0 ? u + ' ago' : 'in ' + u;
-			}
-			function epoch( s ) {
-				return new Date( s * 1000 ).toLocaleString() + ' (' + rel( s ) + ')';
-			}
-			function send( action, cb ) {
-				var xhr = new XMLHttpRequest();
-				xhr.open( 'POST', ajaxurl );
-				xhr.setRequestHeader( 'Content-Type', 'application/x-www-form-urlencoded' );
-				xhr.onload = function() {
-					var res;
-					try { res = JSON.parse( xhr.responseText ); } catch ( e ) { res = { success: false }; }
-					cb( res );
-				};
-				xhr.send( 'action=' + action + '&key=' + encodeURIComponent( cur ) + '&_wpnonce=' + encodeURIComponent( nonce ) );
-			}
-			function close() {
-				mask.hidden = true;
-				cur = null;
-				curRow = null;
-			}
-			function open( key, row ) {
-				cur = key;
-				curRow = row;
-				keyEl.textContent = key;
-				metaEl.innerHTML = '<li><span>Loading…</span><strong></strong></li>';
-				bodyEl.textContent = '';
-				mask.hidden = false;
-				send( 'wp_yac_entry', function( res ) {
-					if ( ! res.success || ! res.data ) {
-						metaEl.innerHTML = '<li><span>Could not load the entry.</span><strong></strong></li>';
-						return;
-					}
-					var d = res.data,
-						rows = [
-							'<li><span>Content (v_len)</span><strong>' + esc( d.v_len ) + '</strong></li>',
-							'<li><span>Occupied (padded)</span><strong>' + esc( d.size ) + '</strong></li>',
-							'<li><span>Expires</span><strong>' + ( d.ttl ? esc( epoch( d.ttl ) ) : 'never' ) + '</strong></li>'
-						];
-					if ( d.atime ) {
-						rows.push( '<li><span>Last access</span><strong>' + esc( epoch( d.atime ) ) + '</strong></li>' );
-					}
-					metaEl.innerHTML = rows.join( '' );
-					if ( d.gone ) {
-						bodyEl.textContent = '(the entry is gone — evicted or expired between the page render and now)';
-					} else {
-						bodyEl.textContent = d.content + ( d.truncated ? '\n… truncated, full content is ' + d.content_len + ' bytes' : '' );
-					}
-				} );
-			}
-
-			document.addEventListener( 'click', function( e ) {
-				var t = e.target.closest ? e.target.closest( '.wp-yac-entry-inspect' ) : null;
-				if ( t ) {
-					open( t.getAttribute( 'data-key' ), t.closest( 'li' ) );
-					return;
-				}
-				if ( e.target === mask || ( e.target.closest && e.target.closest( '[data-wp-yac-close]' ) ) ) {
-					close();
-				}
-			} );
-			delEl.addEventListener( 'click', function() {
-				if ( ! cur ) {
-					return;
-				}
-				send( 'wp_yac_entry_delete', function( res ) {
-					if ( res.success && res.data && res.data.deleted && curRow && curRow.parentNode ) {
-						curRow.parentNode.removeChild( curRow );
-					}
-					close();
-				} );
-			} );
-		} )();
-		</script>
 	</div>
 	<?php
 }

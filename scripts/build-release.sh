@@ -9,7 +9,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-FILES=(wp-yac.php object-cache.php readme.txt LICENSE)
+FILES=(wp-yac.php object-cache.php readme.txt LICENSE assets/wp-yac.css assets/wp-yac-notice.js assets/wp-yac-admin.js)
 OUT="${1:-dist/wp-yac-cache.zip}"
 
 for f in "${FILES[@]}"; do

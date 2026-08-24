@@ -26,10 +26,6 @@ Unlike Memcached or Redis, Yac stores data in **shared memory inherited by every
 * **Single-node focus.** Keys carry no per-blog prefix; installs sharing one PHP pool isolate via `WP_YAC_KEY_PREFIX`. Multisite blogs share one namespace.
 * **Entry inspector.** On the admin page, click any Largest-entries key to see the deserialized value, padded size, expiry and last access (newer yac builds) — or delete the entry.
 
-**Performance**
-
-Measured on a real WordPress site (laruence.com, full homepage renders, PHP 8.1 FPM) against the official Memcached drop-in, swapping only the object-cache backend: ~19% higher throughput (141.8 vs 118.6 requests/sec, stable across 20/50/100 concurrent clients) and ~15% lower p50 latency. The gain is the fixed cost every request pays on cache hits — dozens of localhost TCP round trips replaced by a shared-memory hash lookup.
-
 **Best fit**
 
 Yac is a *local* cache. It is ideal for single-node or few-node WordPress installs where all PHP workers run on one machine. On large multi-server clusters with strict cross-node consistency needs, a network cache (Memcached/Redis) may suit better.

@@ -55,6 +55,7 @@ function wp_delete_file( $f ) { @unlink( $f ); }
 function __( $s, $d = '' ) { return $s; }
 function esc_html__( $s, $d = '' ) { return $s; }
 function number_format_i18n( $n, $dec = 0 ) { return number_format( $n, $dec ); }
+function plugin_dir_url( $f ) { return 'https://example.test/wp-content/plugins/' . basename( dirname( $f ) ) . '/'; }
 
 // Load the plugin shell.
 require __DIR__ . '/../wp-yac.php';
