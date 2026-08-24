@@ -204,6 +204,79 @@ if ( $yac_on ) {
 }
 
 // ---------------------------------------------------------------------------
+// Raw/embedded storage (1.2.0+): values go into Yac unwrapped so small
+// scalars land embedded in the slot itself, no value block; false is
+// stored as null. Pre-1.2 array('v' => ...) entries stay readable.
+// ---------------------------------------------------------------------------
+if ( $yac_on ) {
+	wp_cache_set( 'emb_int', 42 );
+	wp_cache_set( 'emb_zero', 0 );
+	wp_cache_set( 'emb_true', true );
+	wp_cache_set( 'emb_str', 'short' );
+	wp_cache_set( 'emb_empty_str', '' );
+	wp_cache_set( 'emb_empty_arr', array() );
+	wp_cache_set( 'emb_false', false );
+	wp_cache_set( 'emb_null', null );
+
+	/* fresh instance = new request: everything must come back from shm */
+	$GLOBALS['wp_object_cache'] = new WP_Object_Cache();
+
+	check( 'int survives cross-request', wp_cache_get( 'emb_int' ) === 42 );
+	check( 'int 0 survives cross-request', wp_cache_get( 'emb_zero' ) === 0 );
+	check( 'true survives cross-request', wp_cache_get( 'emb_true' ) === true );
+	check( 'short string survives cross-request', wp_cache_get( 'emb_str' ) === 'short' );
+	check( 'empty string survives cross-request', wp_cache_get( 'emb_empty_str' ) === '' );
+	check( 'empty array survives cross-request', wp_cache_get( 'emb_empty_arr' ) === array() );
+
+	$found = null;
+	$v = wp_cache_get( 'emb_false', 'default', false, $found );
+	check( 'stored false survives cross-request (found=true)', $found === true && $v === false );
+
+	$found = null;
+	$v = wp_cache_get( 'emb_null', 'default', false, $found );
+	check( 'stored null survives cross-request as found-false', $found === true && $v === false );
+
+	/* a probe with the same instance prefix inspects the shared store
+	   directly (drop-in default prefix: wp:) */
+	$probe  = new Yac( 'wp:' );
+	$by_key = array();
+	foreach ( (array) $probe->dump( -1 ) as $it ) {
+		if ( isset( $it['key'] ) ) {
+			$by_key[ $it['key'] ] = $it;
+		}
+	}
+
+	if ( isset( $by_key['wp:default:emb_int']['embedded'] ) ) {
+		check( 'small scalars stored embedded',
+			$by_key['wp:default:emb_int']['embedded']
+			&& $by_key['wp:default:emb_zero']['embedded']
+			&& $by_key['wp:default:emb_str']['embedded']
+			&& $by_key['wp:default:emb_empty_str']['embedded']
+			&& $by_key['wp:default:emb_empty_arr']['embedded']
+			&& $by_key['wp:default:emb_false']['embedded'] );
+		check( 'embedded entries use no value-block memory', 0 === (int) $by_key['wp:default:emb_int']['size'] );
+	} else {
+		echo "  skip embedded-flag assertions (Yac build without dump metadata)\n";
+	}
+
+	/* add()/replace() must see a stored false (kept as null) as existing */
+	check( 'add on stored-false key fails', wp_cache_add( 'emb_false', 'nope' ) === false );
+	check( 'replace on stored-false key succeeds', wp_cache_replace( 'emb_false', 'now-string' ) === true );
+	check( 'replaced value reads back', wp_cache_get( 'emb_false' ) === 'now-string' );
+
+	/* pre-1.2 entries were wrapped: still readable during upgrade */
+	$probe->set( 'default:legacy_str', array( 'v' => 'old-format' ) );
+	$probe->set( 'default:legacy_false', array( 'v' => false ) );
+	$GLOBALS['wp_object_cache'] = new WP_Object_Cache();
+	check( 'legacy wrapped entry still readable', wp_cache_get( 'legacy_str' ) === 'old-format' );
+	$found = null;
+	$v = wp_cache_get( 'legacy_false', 'default', false, $found );
+	check( 'legacy stored-false still a found hit', $found === true && $v === false );
+} else {
+	echo "  skip raw/embedded storage assertions (Yac not active)\n";
+}
+
+// ---------------------------------------------------------------------------
 // WP_YAC_SKIP_EMPTY: empty values of unbounded-URL-derived keys stay
 // request-local; stable per-entity negative caches keep being shared
 // ---------------------------------------------------------------------------
