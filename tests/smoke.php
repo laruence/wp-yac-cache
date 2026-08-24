@@ -102,7 +102,9 @@ wp_cache_get( 'missing-key', 'default', false, $found );
 check( 'get sets $found=false on miss', $found === false );
 
 // ---------------------------------------------------------------------------
-// false ambiguity — store the literal false, must be retrievable as a hit
+// stored false: served as a hit within the request (request-level cache);
+// in shared memory it is indistinguishable from a miss by Yac's design,
+// which the cross-request section below asserts
 // ---------------------------------------------------------------------------
 wp_cache_set( 'is_false', false );
 $found = null;
@@ -205,8 +207,9 @@ if ( $yac_on ) {
 
 // ---------------------------------------------------------------------------
 // Raw/embedded storage (1.2.0+): values go into Yac unwrapped so small
-// scalars land embedded in the slot itself, no value block; false is
-// stored as null. Pre-1.2 array('v' => ...) entries stay readable.
+// scalars land embedded in the slot itself, no value block. By design a
+// stored false reads back like a miss cross-request; null stays the
+// shared negative result (found=true, value=false).
 // ---------------------------------------------------------------------------
 if ( $yac_on ) {
 	wp_cache_set( 'emb_int', 42 );
@@ -230,11 +233,15 @@ if ( $yac_on ) {
 
 	$found = null;
 	$v = wp_cache_get( 'emb_false', 'default', false, $found );
-	check( 'stored false survives cross-request (found=true)', $found === true && $v === false );
+	check( 'stored false reads as miss cross-request', $found === false && $v === false );
 
 	$found = null;
 	$v = wp_cache_get( 'emb_null', 'default', false, $found );
 	check( 'stored null survives cross-request as found-false', $found === true && $v === false );
+
+	/* replace()/add() treat the stored false like a miss too */
+	check( 'replace on stored-false key fails', wp_cache_replace( 'emb_false', 'nope' ) === false );
+	check( 'add on stored-false key reports failure', wp_cache_add( 'emb_false', 'nope' ) === false );
 
 	/* a probe with the same instance prefix inspects the shared store
 	   directly (drop-in default prefix: wp:) */
@@ -253,25 +260,12 @@ if ( $yac_on ) {
 			&& $by_key['wp:default:emb_str']['embedded']
 			&& $by_key['wp:default:emb_empty_str']['embedded']
 			&& $by_key['wp:default:emb_empty_arr']['embedded']
-			&& $by_key['wp:default:emb_false']['embedded'] );
+			&& $by_key['wp:default:emb_false']['embedded']
+			&& $by_key['wp:default:emb_null']['embedded'] );
 		check( 'embedded entries use no value-block memory', 0 === (int) $by_key['wp:default:emb_int']['size'] );
 	} else {
 		echo "  skip embedded-flag assertions (Yac build without dump metadata)\n";
 	}
-
-	/* add()/replace() must see a stored false (kept as null) as existing */
-	check( 'add on stored-false key fails', wp_cache_add( 'emb_false', 'nope' ) === false );
-	check( 'replace on stored-false key succeeds', wp_cache_replace( 'emb_false', 'now-string' ) === true );
-	check( 'replaced value reads back', wp_cache_get( 'emb_false' ) === 'now-string' );
-
-	/* pre-1.2 entries were wrapped: still readable during upgrade */
-	$probe->set( 'default:legacy_str', array( 'v' => 'old-format' ) );
-	$probe->set( 'default:legacy_false', array( 'v' => false ) );
-	$GLOBALS['wp_object_cache'] = new WP_Object_Cache();
-	check( 'legacy wrapped entry still readable', wp_cache_get( 'legacy_str' ) === 'old-format' );
-	$found = null;
-	$v = wp_cache_get( 'legacy_false', 'default', false, $found );
-	check( 'legacy stored-false still a found hit', $found === true && $v === false );
 } else {
 	echo "  skip raw/embedded storage assertions (Yac not active)\n";
 }

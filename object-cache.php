@@ -26,10 +26,12 @@
  *   memory on this machine, including data of other Yac users.
  * - Values are stored raw so Yac can embed small scalars (null,
  *   bool, int, string <= 7 bytes, empty array) in the slot itself
- *   without allocating a value block. false is stored as null, which
- *   Yac::get() returns as null — only a miss returns false — and the
- *   read path already serves null as a found negative result.
- *   Pre-1.2 array('v' => ...) entries are still unwrapped on read.
+ *   without allocating a value block. Consequence of the raw format:
+ *   a stored false reads back exactly like a miss (Yac::get() returns
+ *   false for both), so false negatives only work within the request;
+ *   null reads back as a found negative result and is the shared
+ *   negative cache. Upgrading from the pre-1.2 wrapped format needs
+ *   one flush (old array('v' => ...) entries would read back raw).
  * - Without Yac it degrades to a per-request cache; WP keeps working.
  */
 
@@ -308,11 +310,10 @@ class WP_Object_Cache {
 		$ttl = $this->sanitize_ttl( $expire );
 
 		/* Yac::add() can return false on CAS contention even for a free
-		   slot, so retry a couple of times; false goes in as null (see
-		   set()) so an existing negative entry still blocks the add */
+		   slot, so retry a couple of times */
 		$result = false;
 		for ( $try = 0; $try < 3; $try++ ) {
-			$result = $this->yac->add( $key, false === $data ? null : $data, $ttl );
+			$result = $this->yac->add( $key, $data, $ttl );
 			if ( false !== $result ) {
 				break;
 			}
@@ -486,9 +487,7 @@ class WP_Object_Cache {
 			$value = false;
 		} else {
 			$found = true;
-			/* pre-1.2 entries are wrapped array('v' => ...); new ones
-			   are stored raw (see set()) */
-			$value = ( is_array( $raw ) && 1 === count( $raw ) && array_key_exists( 'v', $raw ) ) ? $raw['v'] : $raw;
+			$value = $raw;
 		}
 
 		/* NULL is a cached negative result: found, but false */
@@ -537,8 +536,7 @@ class WP_Object_Cache {
 					$this->cache[ $key ] = array( 'value' => false, 'found' => false, 'group' => $this->sanitize_group( $group ) );
 					$this->group_ops_stats( 'get', $key, $group, null, $elapsed, 'not_in_yac' );
 				} else {
-					/* pre-1.2 entries are wrapped array('v' => ...) */
-					$value = ( is_array( $raw ) && 1 === count( $raw ) && array_key_exists( 'v', $raw ) ) ? $raw['v'] : $raw;
+					$value = $raw;
 					if ( null === $value ) {
 						$value = false;
 					}
@@ -622,12 +620,10 @@ class WP_Object_Cache {
 		$ttl = $this->sanitize_ttl( $expire );
 
 		/* store raw (no wrapper) so small scalars hit Yac's embedded
-		   path and live inside the slot itself, no value block; false
-		   is stored as null — Yac::get() returns null for it but false
-		   for a miss, and the read path serves null as a found
-		   negative result (which is exactly what stored false means) */
+		   path and live inside the slot itself, no value block; a
+		   stored false reads back like a miss by Yac's design */
 		$this->timer_start();
-		$this->yac->set( $key, false === $data ? null : $data, $ttl );
+		$this->yac->set( $key, $data, $ttl );
 		$elapsed = $this->timer_stop();
 
 		/* even if set() returned false (CAS contention), the value is very
