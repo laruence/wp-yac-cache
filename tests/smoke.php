@@ -206,10 +206,10 @@ if ( $yac_on ) {
 }
 
 // ---------------------------------------------------------------------------
-// Raw/embedded storage (1.2.0+): values go into Yac unwrapped so small
-// scalars land embedded in the slot itself, no value block. By design a
-// stored false reads back like a miss cross-request; null stays the
-// shared negative result (found=true, value=false).
+// Raw/embedded storage: values go into Yac unwrapped so small scalars
+// land embedded in the slot itself, no value block. By design a stored
+// false reads back like a miss cross-request; null stays the shared
+// negative result (found=true, value=false).
 // ---------------------------------------------------------------------------
 if ( $yac_on ) {
 	wp_cache_set( 'emb_int', 42 );

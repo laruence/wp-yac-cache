@@ -30,8 +30,8 @@
  *   a stored false reads back exactly like a miss (Yac::get() returns
  *   false for both), so false negatives only work within the request;
  *   null reads back as a found negative result and is the shared
- *   negative cache. Upgrading from the pre-1.2 wrapped format needs
- *   one flush (old array('v' => ...) entries would read back raw).
+ *   negative cache. Upgrading from the old wrapped format needs one
+ *   flush (old array('v' => ...) entries would read back raw).
  * - Without Yac it degrades to a per-request cache; WP keeps working.
  */
 
@@ -46,7 +46,7 @@ if ( ! defined( 'WP_YAC_KEY_PREFIX' ) ) {
 }
 
 if ( ! defined( 'WP_YAC_DROPIN_VERSION' ) ) {
-	define( 'WP_YAC_DROPIN_VERSION', '1.2.0' );
+	define( 'WP_YAC_DROPIN_VERSION', '1.1.0' );
 }
 
 if ( ! defined( 'WP_YAC_SKIP_EMPTY' ) ) {
