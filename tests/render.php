@@ -372,10 +372,19 @@ check( 'inspector unwraps drop-in v wrapper', strpos( $d['content'], '"blogname"
 check( 'inspector reports never-expiring ttl', 0 === $d['ttl'] );
 check( 'inspector reports missing atime as null', null === $d['atime'] );
 check( 'inspector formats sizes', '100 B' === $d['v_len'] || '100 KB' === $d['v_len'] );
+check( 'inspector reports c_len as null for uncompressed entries', null === $d['c_len'] );
 
 $fake->store['wp:options:alloptions']['atime'] = 1234567890;
 $d = wp_yac_entry_detail( $fake, 'wp:options:alloptions' );
 check( 'inspector passes atime through when the build has it', 1234567890 === $d['atime'] );
+
+/* compressed entries (Yac >= 2.4.0 dumps): c_len is the stored compressed
+   payload, v_len the original uncompressed length */
+$fake->store['wp:options:alloptions']['c_len'] = 30000;
+$fake->store['wp:options:alloptions']['v_len'] = 58470;
+$d = wp_yac_entry_detail( $fake, 'wp:options:alloptions' );
+check( 'inspector reports c_len for compressed entries', '29.3 KB' === $d['c_len'] );
+check( 'inspector keeps v_len as the original size', '57.1 KB' === $d['v_len'] );
 
 $d = wp_yac_entry_detail( $fake, 'wp:nope' );
 check( 'inspector reports gone entry', $d['gone'] );

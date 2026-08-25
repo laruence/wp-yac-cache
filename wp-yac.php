@@ -172,8 +172,39 @@ function wp_yac_self_test() {
 	);
 }
 
-/* entry-level statistics from Yac::dump() (null when unavailable);
-   dump(-1) fetches everything — the default limit is 100 */
+/* every entry from Yac::dump(), paged $page_size at a time (null on
+   failure); dump(-1) materializes the entire shared-memory table as one
+   PHP array, which blows past the memory limit on a busy cache.
+   dump($limit, $offset) exists only since Yac 2.4.0 — older builds fall
+   back to the single full dump, the best they offer. */
+function wp_yac_dump_all( $yac, $page_size = 1000 ) {
+	if ( defined( 'YAC_VERSION' ) && version_compare( YAC_VERSION, '2.4.0', '>=' ) ) {
+		$entries = array();
+		$offset  = 0;
+		for ( ;; ) {
+			$page = $yac->dump( $page_size, $offset );
+			if ( ! is_array( $page ) ) {
+				return null;
+			}
+			if ( 0 === count( $page ) ) {
+				break;
+			}
+			foreach ( $page as $entry ) {
+				$entries[] = $entry;
+			}
+			$offset += count( $page );
+			if ( count( $page ) < $page_size ) {
+				break;
+			}
+		}
+		return $entries;
+	}
+
+	$entries = $yac->dump( -1 );
+	return is_array( $entries ) ? $entries : null;
+}
+
+/* entry-level statistics from Yac::dump() (null when unavailable) */
 function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 	if ( isset( $GLOBALS['wp_yac_test_snapshot'] ) ) {
 		return $GLOBALS['wp_yac_test_snapshot'];
@@ -192,8 +223,8 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 		}
 	}
 
-	$entries = $yac->dump( -1 );
-	if ( ! is_array( $entries ) ) {
+	$entries = wp_yac_dump_all( $yac );
+	if ( null === $entries ) {
 		return null;
 	}
 
@@ -848,7 +879,7 @@ function wp_yac_ajax_dismiss_status_notice() {
    expiry timestamp in every build (0 = never). */
 function wp_yac_entry_detail( $yac, $key ) {
 	$meta = null;
-	$dump = $yac->dump( -1 );
+	$dump = wp_yac_dump_all( $yac );
 	if ( is_array( $dump ) ) {
 		foreach ( $dump as $it ) {
 			if ( isset( $it['key'] ) && $it['key'] === $key ) {
@@ -863,6 +894,11 @@ function wp_yac_entry_detail( $yac, $key ) {
 		$value = $value['v']; // unwrap the drop-in's miss-vs-false wrapper
 	}
 
+	/* released Yac 2.4.0 still returns false on a miss (older builds too);
+	   the new get($key, $default) parameter only changes what a miss
+	   returns when a default is asked for, not this sentinel */
+	$gone = false === $value;
+
 	$content = is_string( $value ) ? $value : json_encode( $value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 	if ( ! is_string( $content ) ) {
 		$content = print_r( $value, true );
@@ -876,6 +912,10 @@ function wp_yac_entry_detail( $yac, $key ) {
 	return array(
 		'key'         => $key,
 		'v_len'       => $meta ? wp_yac_format_bytes( $meta['v_len'] ) : '—',
+		/* c_len: the compressed payload actually stored, present only for
+		   compressed entries (Yac >= 2.4.0 dumps); on those v_len is the
+		   original uncompressed length */
+		'c_len'       => ( $meta && array_key_exists( 'c_len', $meta ) ) ? wp_yac_format_bytes( $meta['c_len'] ) : null,
 		'size'        => $meta ? wp_yac_format_bytes( $meta['size'] ) : '—',
 		'ttl'         => $meta ? (int) $meta['ttl'] : 0,
 		'atime'       => ( $meta && array_key_exists( 'atime', $meta ) ) ? (int) $meta['atime'] : null,
@@ -883,7 +923,7 @@ function wp_yac_entry_detail( $yac, $key ) {
 		   same ones that expose atime); null = not supported here */
 		'hits'        => ( $meta && array_key_exists( 'hits', $meta ) ) ? (int) $meta['hits'] : null,
 		'embedded'    => ( $meta && array_key_exists( 'embedded', $meta ) ) ? (bool) $meta['embedded'] : null,
-		'gone'        => false === $value,
+		'gone'        => $gone,
 		'content'     => $content,
 		'content_len' => $len,
 		'truncated'   => $truncated,

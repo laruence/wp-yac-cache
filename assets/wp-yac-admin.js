@@ -54,7 +54,7 @@
 			}
 			var d = res.data,
 				rows = [
-					'<li><span>Content (v_len)</span><strong>' + esc( d.v_len ) + '</strong></li>',
+					'<li><span>Content (' + ( d.c_len != null ? 'v_len/c_len' : 'v_len' ) + ')</span><strong>' + esc( d.v_len ) + ( d.c_len != null ? ' / ' + esc( d.c_len ) : '' ) + '</strong></li>',
 					'<li><span>Occupied (padded)</span><strong>' + esc( d.size ) + '</strong></li>',
 					'<li><span>Expires</span><strong>' + ( d.ttl ? esc( epoch( d.ttl ) ) : 'never' ) + '</strong></li>'
 				];

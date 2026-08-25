@@ -280,6 +280,23 @@ class WP_Object_Cache {
 		}
 	}
 
+	/* miss sentinel: Yac::get() returns false for a missing key in every
+	   build (released 2.4.0 kept the historical behavior). Since 2.4.0
+	   get() accepts a $default returned on a miss, so existence checks
+	   can pass a sentinel and tell "absent" from "stored 0/false" with no
+	   request-cache heuristics. */
+	private function yac_miss_value( $raw ) {
+		return false === $raw;
+	}
+
+	private function yac_key_exists( $key ) {
+		if ( defined( 'YAC_VERSION' ) && version_compare( YAC_VERSION, '2.4.0', '>=' ) ) {
+			return false !== $this->yac->get( $key, false );
+		}
+
+		return ! $this->yac_miss_value( $this->yac->get( $key ) );
+	}
+
 	public function add( $id, $data, $group = 'default', $expire = 0 ) {
 		$key = $this->key( $id, $group );
 
@@ -304,15 +321,8 @@ class WP_Object_Cache {
 			return false;
 		}
 
-		$existing = $this->yac->get( $key );
-
-		if ( false !== $existing ) {
-			/* a stored 0 may have been false before coercion: get() cannot
-			   tell, so check the request-level cache; absent there, it is
-			   an ambiguous entry this request didn't write — assume taken */
-			if ( 0 !== $existing || ! isset( $this->cache[ $key ] ) || $this->cache[ $key ]['found'] ) {
-				return false;
-			}
+		if ( $this->yac_key_exists( $key ) ) {
+			return false;
 		}
 
 		if ( $this->shm_write_skip( $id, $group, $data ) ) {
@@ -598,13 +608,11 @@ class WP_Object_Cache {
 		}
 
 		/* no native replace in Yac: check existence, then set(). There is a
-		   small TOCTOU window, which is just Yac's lock-free nature. */
-		$existing = $this->yac->get( $key );
-		if ( false === $existing ) {
-			/* get() also returns false for a stored 0 (coerced from false
-			   before writing). What this request set/found is trusted via
-			   the request-level cache; a false from anywhere else stays
-			   ambiguous and is reported as missing. */
+		   small TOCTOU window, which is just Yac's lock-free nature. On
+		   Yac >= 2.4.0 the existence check uses get($key, $default), which
+		   sees through the stored-0 (coerced false) ambiguity; older builds
+		   fall back to the sentinel plus the request-level cache. */
+		if ( ! $this->yac_key_exists( $key ) ) {
 			if ( ! isset( $this->cache[ $key ] ) || ! $this->cache[ $key ]['found'] ) {
 				$this->cache[ $key ] = array( 'value' => false, 'found' => false, 'group' => $this->sanitize_group( $group ) );
 				return false;

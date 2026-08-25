@@ -207,8 +207,9 @@ if ( $yac_on ) {
 // ---------------------------------------------------------------------------
 // Raw/embedded storage: values go into Yac unwrapped so small scalars
 // land embedded in the slot itself, no value block. false is coerced to
-// 0 before writing (a stored false would read back like a miss), null
-// stays the shared negative result (found=true, value=false).
+// 0 before writing (a stored false reads back like a miss — get()
+// returns false for both), null stays the shared negative result
+// (found=true, value=false).
 // ---------------------------------------------------------------------------
 if ( $yac_on ) {
 	wp_cache_set( 'emb_int', 42 );

@@ -101,7 +101,8 @@ Yac cannot delete entries by prefix, so a group flush clears the request-level c
 
 = 1.1.1 =
 * A stored `false` is now written to shared memory as `0`. Yac's `get()` returns `false` for both a miss and a stored `false`, so false negatives never survived past the request; with `0` they persist like any other value (readers comparing by value see `0` instead of `false`).
-* Admin page: top entries grew a Hottest tab (by access count) alongside Largest, shown whenever this yac build reports per-entry hits; the entry inspector gains Hits and Embedded-in-slot metadata.
+* Admin page: top entries grew a Hottest tab (by access count) alongside Largest, shown whenever this yac build reports per-entry hits; the entry inspector gains Hits, Embedded-in-slot and compressed-payload (`c_len`) metadata.
+* Admin page: entry listings now page through `Yac::dump()` 1000 entries at a time instead of one `dump(-1)`, which could exhaust the PHP memory limit on a busy cache; builds older than 2.4.0 fall back to the single full dump.
 
 = 1.1.0 =
 * Dashboard rebuilt around a cache-health verdict: hit-rate ring, cause-attributed metric bars, keys-by-group pie, largest entries by content length, configuration reference and runtime diagnostics.
