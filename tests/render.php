@@ -37,6 +37,7 @@ function register_activation_hook( $f, $cb )   {}
 function register_deactivation_hook( $f, $cb ) {}
 function register_uninstall_hook( $f, $cb )    {}
 function add_action( $hook, $cb )              {}
+function plugin_dir_url( $f ) { return 'http://example.com/wp-content/plugins/wp-yac-cache/'; }
 function is_admin() { return true; }
 function is_multisite() { return false; }
 function current_user_can( $cap ) { return true; }
@@ -97,7 +98,18 @@ function fake_snapshot( $over = array() ) {
 		'occupied' => 26000000, /* well below the 64M pool */
 		'own'      => 1262,
 		'average'  => 20602,
-		'largest'  => array( array( 71300, 148000, 'wp_x:options:alloptions' ) ),
+		/* rows: [ v_len, size, key, hits, atime ]; hits/atime null on
+		   older Yac builds (then has_meta is false and no Hottest tab) */
+		'largest'  => array(
+			array( 71300, 148000, 'wp_x:options:alloptions', 41, 1748160000 ),
+			array( 50000, 95000, 'wp_x:posts:42', 23, 1748159000 ),
+		),
+		'has_meta' => true,
+		'hits_max' => 1200,
+		'hottest'  => array(
+			array( 900, 1400, 'wp_x:posts:1', 1200, 1748160000 ),
+			array( 2100, 4000, 'wp_x:options:alloptions', 890, 1748160000 ),
+		),
 		'groups'   => array(
 			array( 'label' => 'options', 'n' => 900, 'bytes' => 18000000 ),
 			array( 'label' => 'posts', 'n' => 250, 'bytes' => 5000000 ),
@@ -134,6 +146,9 @@ check( 'config table lists directives', strpos( $html, 'yac.keys_memory_size' ) 
 check( 'legacy counters panel removed', strpos( $html, '>Counters<' ) === false );
 check( 'memory contents panel rendered', strpos( $html, 'Shared memory contents' ) !== false );
 check( 'largest keys are clickable', strpos( $html, 'wp-yac-entry-inspect' ) !== false && strpos( $html, 'data-key="wp_x:options:alloptions"' ) !== false );
+check( 'hottest tab rendered when dump reports hits', strpos( $html, 'wp-yac-tab' ) !== false && strpos( $html, '>Hottest<' ) !== false );
+check( 'hottest list hidden by default', strpos( $html, 'wp-yac-entry-list is-hidden' ) !== false );
+check( 'hottest caption names the hit ceiling', strpos( $html, 'top 1,200 hits' ) !== false );
 check( 'entry inspector modal rendered', strpos( $html, 'wp-yac-modal' ) !== false );
 check( 'occupied metric uses padded size', strpos( $html, 'Occupied' ) !== false );
 check( 'group pie rendered', strpos( $html, 'wp-yac-pie' ) !== false );

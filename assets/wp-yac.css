@@ -51,13 +51,19 @@
 	.wp-yac-modal-head code { font-size: 13px; color: #1d2327; word-break: break-all; font-family: Consolas, Monaco, monospace; }
 	.wp-yac-modal-x { border: 0; background: none; font-size: 20px; line-height: 1; cursor: pointer; color: #646970; padding: 4px 8px; border-radius: 4px; }
 	.wp-yac-modal-x:hover { color: #1d2327; background: #f0f0f1; }
-	.wp-yac-modal .wp-yac-op-list { margin: 0; padding: 4px 16px 0; }
+	.wp-yac-modal .wp-yac-op-list { margin: 0; padding: 4px 16px 0; display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
 	.wp-yac-modal-sub { margin: 14px 16px 0; padding: 0; font-size: 13px; font-weight: 600; color: #1d2327; }
 	.wp-yac-modal-pre { margin: 6px 16px 12px; padding: 10px 12px; background: #f6f7f7; border: 1px solid #f0f0f1; border-radius: 6px; overflow: auto; max-height: 46vh; font-family: Consolas, Monaco, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 	.wp-yac-modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid #f0f0f1; background: #f6f7f7; border-radius: 0 0 8px 8px; }
 	.wp-yac-entry-bars-lg .wp-yac-entry-key { width: 300px; }
 	.wp-yac-entry-bars-lg .wp-yac-entry-bar-track { height: 14px; }
 	.wp-yac-entry-bars-lg strong { width: 90px; }
+	.wp-yac-tabs { display: flex; gap: 4px; margin: 10px 0 2px; border-bottom: 1px solid #dcdcde; }
+	.wp-yac-tab { border: 0; background: none; padding: 6px 10px; font-size: 13px; color: #646970; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+	.wp-yac-tab:hover { color: #135e96; }
+	.wp-yac-tab.is-active { color: #1d2327; font-weight: 600; border-bottom-color: #2271b1; }
+	.wp-yac-entry-list.is-hidden { display: none; }
+	.wp-yac-entry-bars .wp-yac-entry-caption { color: #646970; font-size: 12px; padding-bottom: 2px; }
 	.wp-yac-note { color: #646970; font-size: 12px; margin-top: 8px; }
 	.wp-yac-health { display: flex; gap: 28px; flex-wrap: wrap; align-items: center; }
 	.wp-yac-health-ring { flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; }

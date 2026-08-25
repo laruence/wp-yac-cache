@@ -24,7 +24,7 @@ Unlike Memcached or Redis, Yac stores data in **shared memory inherited by every
 * **Simple keys, simple flush.** Keys are stored verbatim while they fit Yac's 48-byte limit; `wp_cache_flush()` calls `Yac::flush()` and wipes the entire shared memory on the machine — know that before you flush.
 * **Graceful degradation.** If Yac is unavailable (extension missing), the drop-in falls back to a per-request in-memory cache and WordPress keeps working.
 * **Single-node focus.** Keys carry no per-blog prefix; installs sharing one PHP pool isolate via `WP_YAC_KEY_PREFIX`. Multisite blogs share one namespace.
-* **Entry inspector.** On the admin page, click any Largest-entries key to see the deserialized value, padded size, expiry and last access (newer yac builds) — or delete the entry.
+* **Entry inspector.** On the admin page, click any top-entry key to see the deserialized value, padded size, expiry and — on newer yac builds — last access, hit count and whether the value is embedded in its slot; or delete the entry.
 
 **Best fit**
 
@@ -101,6 +101,7 @@ Yac cannot delete entries by prefix, so a group flush clears the request-level c
 
 = 1.1.1 =
 * A stored `false` is now written to shared memory as `0`. Yac's `get()` returns `false` for both a miss and a stored `false`, so false negatives never survived past the request; with `0` they persist like any other value (readers comparing by value see `0` instead of `false`).
+* Admin page: top entries grew a Hottest tab (by access count) alongside Largest, shown whenever this yac build reports per-entry hits; the entry inspector gains Hits and Embedded-in-slot metadata.
 
 = 1.1.0 =
 * Dashboard rebuilt around a cache-health verdict: hit-rate ring, cause-attributed metric bars, keys-by-group pie, largest entries by content length, configuration reference and runtime diagnostics.

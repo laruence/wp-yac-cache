@@ -21,6 +21,9 @@
 	function epoch( s ) {
 		return new Date( s * 1000 ).toLocaleString() + ' (' + rel( s ) + ')';
 	}
+	function num( n ) {
+		return String( n ).replace( /\B(?=(\d{3})+(?!\d))/g, ',' );
+	}
 	function send( action, cb ) {
 		var xhr = new XMLHttpRequest();
 		xhr.open( 'POST', ajaxurl );
@@ -58,6 +61,12 @@
 			if ( d.atime ) {
 				rows.push( '<li><span>Last access</span><strong>' + esc( epoch( d.atime ) ) + '</strong></li>' );
 			}
+			if ( d.hits != null ) {
+				rows.push( '<li><span>Hits</span><strong>' + esc( num( d.hits ) ) + '</strong></li>' );
+			}
+			if ( d.embedded != null ) {
+				rows.push( '<li><span>Embedded in slot</span><strong>' + ( d.embedded ? 'yes' : 'no' ) + '</strong></li>' );
+			}
 			metaEl.innerHTML = rows.join( '' );
 			if ( d.gone ) {
 				bodyEl.textContent = '(the entry is gone — evicted or expired between the page render and now)';
@@ -68,6 +77,18 @@
 	}
 
 	document.addEventListener( 'click', function( e ) {
+		var tab = e.target.closest ? e.target.closest( '.wp-yac-tab' ) : null;
+		if ( tab ) {
+			var list = tab.getAttribute( 'data-wp-yac-list' );
+			document.querySelectorAll( '.wp-yac-tab' ).forEach( function( b ) {
+				b.classList.toggle( 'is-active', b === tab );
+				b.setAttribute( 'aria-selected', b === tab ? 'true' : 'false' );
+			} );
+			document.querySelectorAll( '.wp-yac-entry-list' ).forEach( function( ul ) {
+				ul.classList.toggle( 'is-hidden', ul.getAttribute( 'data-wp-yac-list' ) !== list );
+			} );
+			return;
+		}
 		var t = e.target.closest ? e.target.closest( '.wp-yac-entry-inspect' ) : null;
 		if ( t ) {
 			open( t.getAttribute( 'data-key' ), t.closest( 'li' ) );

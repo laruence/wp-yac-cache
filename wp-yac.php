@@ -204,6 +204,7 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 	$own      = 0;
 	$largest  = array();
 	$groups   = array();
+	$hits_max = 0;
 
 	/* the drop-in stores "<storage_prefix><group>:<key>" */
 	foreach ( $entries as $entry ) {
@@ -225,10 +226,24 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 		$occupied += $alloc;
 
 		/* diag:* keys are the plugin's own markers; keep them out of
-		   the pie chart and largest-entries list */
+		   the pie chart and the entry listings */
 		$is_diag = ( '' !== $prefix && 0 === strpos( $key, $prefix . 'diag:' ) );
 		if ( ! $is_diag ) {
-			$largest[] = array( $vlen, $alloc, $key );
+			/* newer Yac builds add per-entry hits/atime to dump(); older
+			   builds return no such keys. The admin page shows the
+			   hottest tab only when hits exists — probe the first
+			   non-diag entry, it is guaranteed a find() touch if the
+			   build tracks it */
+			$largest[] = array(
+				(int) $vlen,
+				(int) $alloc,
+				$key,
+				array_key_exists( 'hits', $entry ) ? (int) $entry['hits'] : null,
+				array_key_exists( 'atime', $entry ) ? (int) $entry['atime'] : null,
+			);
+			if ( isset( $entry['hits'] ) && (int) $entry['hits'] > $hits_max ) {
+				$hits_max = (int) $entry['hits'];
+			}
 		}
 
 		if ( $is_diag ) {
@@ -275,7 +290,11 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 		$group_list[] = $other;
 	}
 
-	rsort( $largest );
+	rsort( $largest ); /* rows sort by v_len (largest first), ties broken by key */
+
+	/* 'hits' only exists in newer Yac builds (see above); show the
+	   hottest tab only when it came back on the first probed entry */
+	$has_meta = ! empty( $largest ) && null !== $largest[0][3];
 
 	$result = array(
 		'entries'  => $total,
@@ -284,8 +303,18 @@ function wp_yac_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 		'own'      => $own,
 		'average'  => $total > 0 ? $occupied / $total : 0,
 		'largest'  => array_slice( $largest, 0, $top ),
+		'has_meta' => $has_meta,
+		'hits_max' => $hits_max,
 		'groups'   => $group_list,
 	);
+
+	if ( $has_meta ) {
+		$by_hits = $largest;
+		usort( $by_hits, function ( $a, $b ) {
+			return $b[3] <=> $a[3] ?: $b[0] <=> $a[0];
+		} );
+		$result['hottest'] = array_slice( $by_hits, 0, $top );
+	}
 
 	if ( $cache_ttl > 0 && '' !== $prefix ) {
 		$yac->set( 'diag:snapshot', $result, $cache_ttl );
@@ -814,9 +843,9 @@ function wp_yac_ajax_dismiss_status_notice() {
 }
 
 /* entry inspector: per-entry metadata from Yac::dump(), the deserialized
-   value via get(). atime only exists in newer yac builds — detected at
-   runtime, shown as unavailable otherwise. ttl is an absolute expiry
-   timestamp in every build (0 = never). */
+   value via get(). atime/hits/embedded only exist in newer yac builds —
+   detected at runtime, shown as unavailable otherwise. ttl is an absolute
+   expiry timestamp in every build (0 = never). */
 function wp_yac_entry_detail( $yac, $key ) {
 	$meta = null;
 	$dump = $yac->dump( -1 );
@@ -850,6 +879,10 @@ function wp_yac_entry_detail( $yac, $key ) {
 		'size'        => $meta ? wp_yac_format_bytes( $meta['size'] ) : '—',
 		'ttl'         => $meta ? (int) $meta['ttl'] : 0,
 		'atime'       => ( $meta && array_key_exists( 'atime', $meta ) ) ? (int) $meta['atime'] : null,
+		/* per-entry hits/embedded only exist in newer Yac builds (the
+		   same ones that expose atime); null = not supported here */
+		'hits'        => ( $meta && array_key_exists( 'hits', $meta ) ) ? (int) $meta['hits'] : null,
+		'embedded'    => ( $meta && array_key_exists( 'embedded', $meta ) ) ? (bool) $meta['embedded'] : null,
 		'gone'        => false === $value,
 		'content'     => $content,
 		'content_len' => $len,
@@ -1123,17 +1156,47 @@ function wp_yac_render_admin_page() {
 								<li><span><?php echo esc_html( 'Average occupied / entry' ); ?></span><strong><?php echo esc_html( wp_yac_format_bytes( $snapshot['average'] ) ); ?></strong></li>
 							</ul>
 							<?php if ( ! empty( $snapshot['largest'] ) ) : ?>
-								<h3 style="margin: 14px 0 6px; font-size: 13px"><?php echo esc_html( 'Largest entries (by content length)' ); ?></h3>
-								<?php $largest_size = max( array_column( $snapshot['largest'], 0 ) ); ?>
-								<ul class="wp-yac-entry-bars wp-yac-entry-bars-lg">
-								<?php foreach ( $snapshot['largest'] as $entry ) : ?>
-									<li>
-										<button type="button" class="wp-yac-entry-inspect" data-key="<?php echo esc_attr( $entry[2] ); ?>" title="<?php echo esc_attr( $entry[2] ); ?>"><?php echo esc_html( $entry[2] ); ?></button>
-										<span class="wp-yac-entry-bar-track"><span class="wp-yac-entry-bar" style="width: <?php echo esc_attr( round( $entry[0] / $largest_size * 100 ) ); ?>%"></span></span>
-										<strong><?php echo esc_html( wp_yac_format_bytes( $entry[0] ) ); ?></strong>
-									</li>
+								<?php
+								/* tabs only when this Yac build reports per-entry
+								   hits; the bar width is normalized to the
+								   tab's own axis */
+								$wp_yac_lists = array(
+									'largest' => array( 'Largest', 'by content length', $snapshot['largest'], 0, max( 1, (int) $snapshot['largest'][0][0] ) ),
+								);
+								if ( ! empty( $snapshot['has_meta'] ) ) {
+									$wp_yac_lists['hottest'] = array( 'Hottest', 'by access count', $snapshot['hottest'], 3, max( 1, (int) $snapshot['hits_max'] ) );
+								}
+								?>
+								<h3 style="margin: 14px 0 6px; font-size: 13px"><?php echo esc_html( 'Top entries' ); ?></h3>
+								<?php if ( count( $wp_yac_lists ) > 1 ) : ?>
+									<div class="wp-yac-tabs" role="tablist">
+										<?php foreach ( $wp_yac_lists as $wp_yac_tab_id => $wp_yac_tab ) : ?>
+											<button type="button" role="tab" id="wp-yac-tab-<?php echo esc_attr( $wp_yac_tab_id ); ?>" class="wp-yac-tab<?php echo 'largest' === $wp_yac_tab_id ? ' is-active' : ''; ?>" aria-selected="<?php echo 'largest' === $wp_yac_tab_id ? 'true' : 'false'; ?>" data-wp-yac-list="<?php echo esc_attr( $wp_yac_tab_id ); ?>"><?php echo esc_html( $wp_yac_tab[0] ); ?></button>
+										<?php endforeach; ?>
+									</div>
+								<?php endif; ?>
+								<?php foreach ( $wp_yac_lists as $wp_yac_tab_id => $wp_yac_tab ) : ?>
+									<?php
+									$wp_yac_caption = esc_html( $wp_yac_tab[1] );
+									if ( 'hottest' === $wp_yac_tab_id ) {
+										$wp_yac_caption .= ' &middot; top ' . esc_html( number_format_i18n( $wp_yac_tab[4] ) ) . ' hits';
+									}
+									?>
+									<ul class="wp-yac-entry-bars wp-yac-entry-bars-lg wp-yac-entry-list<?php echo 'largest' === $wp_yac_tab_id ? '' : ' is-hidden'; ?>" data-wp-yac-list="<?php echo esc_attr( $wp_yac_tab_id ); ?>" aria-labelledby="wp-yac-tab-<?php echo esc_attr( $wp_yac_tab_id ); ?>">
+										<li class="wp-yac-entry-caption"><?php echo $wp_yac_caption; // phpcs:ignore WordPress.Security.EscapeOutput -- escaped above ?></li>
+										<?php foreach ( $wp_yac_tab[2] as $entry ) : ?>
+											<?php
+											$wp_yac_value = 'hottest' === $wp_yac_tab_id ? $entry[3] : $entry[0];
+											$wp_yac_pct   = round( (int) $wp_yac_value / $wp_yac_tab[4] * 100 );
+											?>
+											<li>
+												<button type="button" class="wp-yac-entry-inspect" data-key="<?php echo esc_attr( $entry[2] ); ?>" title="<?php echo esc_attr( $entry[2] ); ?>"><?php echo esc_html( $entry[2] ); ?></button>
+												<span class="wp-yac-entry-bar-track"><span class="wp-yac-entry-bar" style="width: <?php echo esc_attr( $wp_yac_pct ); ?>%"></span></span>
+												<strong><?php echo 'hottest' === $wp_yac_tab_id ? esc_html( number_format_i18n( $wp_yac_value ) ) : esc_html( wp_yac_format_bytes( $wp_yac_value ) ); ?></strong>
+											</li>
+										<?php endforeach; ?>
+									</ul>
 								<?php endforeach; ?>
-								</ul>
 							<?php endif; ?>
 							<p class="wp-yac-note"><?php echo esc_html( 'Occupied = Σ entry.size (padded); Content = Σ v_len; overwritten-but-unreclaimed entries slightly overstate. Flush wipes the machine’s entire shared memory.' ); ?></p>
 						</div>
