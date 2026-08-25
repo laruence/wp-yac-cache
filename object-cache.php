@@ -26,12 +26,14 @@
  *   memory on this machine, including data of other Yac users.
  * - Values are stored raw so Yac can embed small scalars (null,
  *   bool, int, string <= 7 bytes, empty array) in the slot itself
- *   without allocating a value block. Consequence of the raw format:
- *   a stored false reads back exactly like a miss (Yac::get() returns
- *   false for both), so false negatives only work within the request;
- *   null reads back as a found negative result and is the shared
- *   negative cache. Upgrading from the old wrapped format needs one
- *   flush (old array('v' => ...) entries would read back raw).
+ *   without allocating a value block. false is coerced to 0 before
+ *   writing: Yac::get() returns false for both a miss and a stored
+ *   false, so false cannot round-trip through shared memory; 0 does.
+ *   Readers that compare by value see 0 instead of false — WP core's
+ *   loose checks make no difference. null reads back as a found
+ *   negative result and stays the shared negative cache. Upgrading
+ *   from the old wrapped format needs one flush (old array('v' => ...)
+ *   entries would read back raw).
  * - Without Yac it degrades to a per-request cache; WP keeps working.
  */
 
@@ -46,7 +48,7 @@ if ( ! defined( 'WP_YAC_KEY_PREFIX' ) ) {
 }
 
 if ( ! defined( 'WP_YAC_DROPIN_VERSION' ) ) {
-	define( 'WP_YAC_DROPIN_VERSION', '1.1.0' );
+	define( 'WP_YAC_DROPIN_VERSION', '1.1.1' );
 }
 
 if ( ! defined( 'WP_YAC_SKIP_EMPTY' ) ) {
@@ -285,6 +287,10 @@ class WP_Object_Cache {
 			$data = clone $data;
 		}
 
+		if ( false === $data ) {
+			$data = 0; /* Yac::get() cannot tell a stored false from a miss */
+		}
+
 		if ( in_array( $group, $this->non_persistent_groups, true ) || ! $this->yac_available ) {
 			if ( isset( $this->cache[ $key ]['found'] ) && $this->cache[ $key ]['found'] ) {
 				return false;
@@ -294,8 +300,19 @@ class WP_Object_Cache {
 			return true;
 		}
 
-		if ( isset( $this->written[ $key ] ) || false !== $this->yac->get( $key ) ) {
+		if ( isset( $this->written[ $key ] ) ) {
 			return false;
+		}
+
+		$existing = $this->yac->get( $key );
+
+		if ( false !== $existing ) {
+			/* a stored 0 may have been false before coercion: get() cannot
+			   tell, so check the request-level cache; absent there, it is
+			   an ambiguous entry this request didn't write — assume taken */
+			if ( 0 !== $existing || ! isset( $this->cache[ $key ] ) || $this->cache[ $key ]['found'] ) {
+				return false;
+			}
 		}
 
 		if ( $this->shm_write_skip( $id, $group, $data ) ) {
@@ -582,10 +599,16 @@ class WP_Object_Cache {
 
 		/* no native replace in Yac: check existence, then set(). There is a
 		   small TOCTOU window, which is just Yac's lock-free nature. */
-		$raw = $this->yac->get( $key );
-		if ( false === $raw ) {
-			$this->cache[ $key ] = array( 'value' => false, 'found' => false, 'group' => $this->sanitize_group( $group ) );
-			return false;
+		$existing = $this->yac->get( $key );
+		if ( false === $existing ) {
+			/* get() also returns false for a stored 0 (coerced from false
+			   before writing). What this request set/found is trusted via
+			   the request-level cache; a false from anywhere else stays
+			   ambiguous and is reported as missing. */
+			if ( ! isset( $this->cache[ $key ] ) || ! $this->cache[ $key ]['found'] ) {
+				$this->cache[ $key ] = array( 'value' => false, 'found' => false, 'group' => $this->sanitize_group( $group ) );
+				return false;
+			}
 		}
 
 		return $this->set( $id, $data, $group, $expire );
@@ -596,6 +619,10 @@ class WP_Object_Cache {
 
 		if ( is_object( $data ) ) {
 			$data = clone $data;
+		}
+
+		if ( false === $data ) {
+			$data = 0; /* Yac::get() cannot tell a stored false from a miss */
 		}
 
 		$this->cache[ $key ] = array( 'value' => $data, 'found' => false, 'group' => $this->sanitize_group( $group ) );
@@ -620,8 +647,9 @@ class WP_Object_Cache {
 		$ttl = $this->sanitize_ttl( $expire );
 
 		/* store raw (no wrapper) so small scalars hit Yac's embedded
-		   path and live inside the slot itself, no value block; a
-		   stored false reads back like a miss by Yac's design */
+		   path and live inside the slot itself, no value block; false
+		   arrived already coerced to 0 (a stored false would read back
+		   like a miss) */
 		$this->timer_start();
 		$this->yac->set( $key, $data, $ttl );
 		$elapsed = $this->timer_stop();

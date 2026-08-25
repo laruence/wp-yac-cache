@@ -27,8 +27,9 @@ Best fit is single-node (or few-node) WordPress installs.
 - **Pollution guard** — `WP_YAC_SKIP_EMPTY` (on by default, the single
   filter) keeps empty `get_page_by_path:` negatives (bot 404 probes,
   never re-read) request-local
-- **False-safe** — values are stored as `array('v' => $data)` to resolve
-  Yac's miss-vs-stored-false ambiguity
+- **False-safe** — a stored `false` is coerced to `0` before writing to
+  shared memory (Yac's `get()` cannot tell a stored false from a miss);
+  readers comparing by value see `0` instead of `false`
 - **Admin dashboard** — live stats, health advice and self-test, see
   [Dashboard](#dashboard)
 - **Multisite aware** — keys carry no per-blog prefix; isolation between

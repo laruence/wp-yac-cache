@@ -102,14 +102,13 @@ wp_cache_get( 'missing-key', 'default', false, $found );
 check( 'get sets $found=false on miss', $found === false );
 
 // ---------------------------------------------------------------------------
-// stored false: served as a hit within the request (request-level cache);
-// in shared memory it is indistinguishable from a miss by Yac's design,
-// which the cross-request section below asserts
+// stored false: coerced to 0 before hitting the backend (a stored false is
+// indistinguishable from a miss for Yac::get()), so it reads back as 0
 // ---------------------------------------------------------------------------
 wp_cache_set( 'is_false', false );
 $found = null;
 $v = wp_cache_get( 'is_false', 'default', false, $found );
-check( 'stored false is retrievable (found=true)', $found === true && $v === false );
+check( 'stored false is retrievable (found=true)', $found === true && $v === 0 );
 
 // ---------------------------------------------------------------------------
 // add semantics
@@ -207,9 +206,9 @@ if ( $yac_on ) {
 
 // ---------------------------------------------------------------------------
 // Raw/embedded storage: values go into Yac unwrapped so small scalars
-// land embedded in the slot itself, no value block. By design a stored
-// false reads back like a miss cross-request; null stays the shared
-// negative result (found=true, value=false).
+// land embedded in the slot itself, no value block. false is coerced to
+// 0 before writing (a stored false would read back like a miss), null
+// stays the shared negative result (found=true, value=false).
 // ---------------------------------------------------------------------------
 if ( $yac_on ) {
 	wp_cache_set( 'emb_int', 42 );
@@ -233,15 +232,16 @@ if ( $yac_on ) {
 
 	$found = null;
 	$v = wp_cache_get( 'emb_false', 'default', false, $found );
-	check( 'stored false reads as miss cross-request', $found === false && $v === false );
+	check( 'stored false survives cross-request as 0', $found === true && $v === 0 );
 
 	$found = null;
 	$v = wp_cache_get( 'emb_null', 'default', false, $found );
 	check( 'stored null survives cross-request as found-false', $found === true && $v === false );
 
-	/* replace()/add() treat the stored false like a miss too */
-	check( 'replace on stored-false key fails', wp_cache_replace( 'emb_false', 'nope' ) === false );
+	/* replace()/add() treat the stored 0 as an existing value */
+	check( 'replace on stored-false key succeeds', wp_cache_replace( 'emb_false', 'nope' ) === true );
 	check( 'add on stored-false key reports failure', wp_cache_add( 'emb_false', 'nope' ) === false );
+	check( 'replace value visible', wp_cache_get( 'emb_false' ) === 'nope' );
 
 	/* a probe with the same instance prefix inspects the shared store
 	   directly (drop-in default prefix: wp:) */
