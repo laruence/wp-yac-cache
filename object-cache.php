@@ -218,7 +218,6 @@ class WP_Object_Cache {
 	private $cache = array(); /* request-level: key => value/found/group */
 
 	private $non_persistent_groups = array();
-	private $global_groups = array();
 
 	private $storage_prefix = ''; /* Yac instance prefix; the only per-site isolation */
 	private $logical_key_budget = 34; /* bytes left after the instance prefix */
@@ -689,12 +688,9 @@ class WP_Object_Cache {
 		return true;
 	}
 
+	/* accepted for API compatibility only: keys carry no per-blog
+	   prefix, so the global-vs-per-blog distinction has no effect */
 	public function add_global_groups( $groups ) {
-		$groups = (array) $groups;
-
-		$this->global_groups = array_merge( $this->global_groups, $groups );
-		$this->global_groups = array_unique( $this->global_groups );
-
 		return true;
 	}
 
