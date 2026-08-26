@@ -143,6 +143,20 @@ yac.keys_memory_size = 4M      ; ~32K slots
 yac.values_memory_size = 64M   ; raise for large sites (alloptions!)
 ```
 
+> **Do not set `yac.serializer` to `json`.** WordPress's object cache stores
+> PHP objects (`WP_Post`, `WP_Term`, option values, …), and a JSON serializer
+> cannot round-trip them: objects come back as arrays, and core code feeding
+> an array where an object is expected dies with a fatal error (e.g.
+> `get_object_vars(): Argument #1 must be of type object, array given`).
+> It also corrupts binary data (`json_encode` fails on non-UTF-8 bytes, so
+> such values are silently dropped).
+>
+> Leave the default `php` serializer. If you built Yac with
+> `--enable-json` and set `yac.serializer=json`, WordPress breaks the moment
+> the first cached object is read back. Note that an unknown serializer name
+> in the ini falls back to `php` silently — check `php --ri yac`
+> (`Serializer =>`) for what is actually in effect, not what the ini says.
+
 ```php
 ; wp-config.php escape hatches
 define( 'WP_YAC_DISABLE', true );    // force runtime-only mode
