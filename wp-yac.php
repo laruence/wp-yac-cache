@@ -901,7 +901,7 @@ function wp_yac_entry_detail( $yac, $key ) {
 
 	$content = is_string( $value ) ? $value : json_encode( $value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 	if ( ! is_string( $content ) ) {
-		$content = print_r( $value, true );
+		$content = print_r( $value, true ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_print_r -- fallback renderer when json_encode() fails; returns a string, never printed
 	}
 	$len       = strlen( $content );
 	$truncated = $len > 131072;
@@ -1137,9 +1137,9 @@ function wp_yac_render_admin_page() {
 			<div class="wp-yac-panel">
 				<div class="wp-yac-health">
 					<div class="wp-yac-health-ring">
-						<?php echo 'warmup' === $health['verdict']
+						<?php echo wp_kses_post( 'warmup' === $health['verdict']
 							? wp_yac_health_donut( 0, $health_color, 'N/A', 'warming up' )
-							: wp_yac_health_donut( $health['rate'], $health_color ); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+							: wp_yac_health_donut( $health['rate'], $health_color ) ); ?>
 						<span class="wp-yac-chip <?php echo esc_attr( $wp_yac_chip[0] ); ?>"><?php echo esc_html( $wp_yac_chip[1] ); ?></span>
 					</div>
 					<div class="wp-yac-health-bars">
