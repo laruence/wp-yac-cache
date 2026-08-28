@@ -22,7 +22,7 @@ jobs:
 
       - name: Syntax check
         run: |
-          php -l wp-yac.php
+          php -l yac-ocache.php
           php -l object-cache.php
 
       - name: Drop-in smoke test (runtime-only fallback)
@@ -43,7 +43,7 @@ jobs:
 
       - name: Syntax check
         run: |
-          php -l wp-yac.php
+          php -l yac-ocache.php
           php -l object-cache.php
 
       - name: Drop-in smoke test (shared memory)
@@ -64,5 +64,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wp-yac-object-cache
-          path: dist/wp-yac-cache.zip
+          name: yac-ocache
+          path: dist/yac-ocache.zip

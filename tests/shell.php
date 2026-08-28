@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin-shell smoke test: stub WordPress enough to load wp-yac.php, then
+ * Plugin-shell smoke test: stub WordPress enough to load yac-ocache.php, then
  * exercise deploy/status logic against a temporary WP_CONTENT_DIR.
  *
  * Run: php tests/shell.php
@@ -23,7 +23,7 @@ function check( $label, $cond ) {
 }
 
 // --- Temporary WordPress skeleton -------------------------------------------
-$tmp = sys_get_temp_dir() . '/wp-yac-shell-' . getmypid();
+$tmp = sys_get_temp_dir() . '/yac-ocache-shell-' . getmypid();
 @mkdir( $tmp, 0777, true );
 @mkdir( $tmp . '/wp-content', 0777, true );
 
@@ -32,11 +32,11 @@ define( 'WP_CONTENT_DIR', $tmp . '/wp-content' );
 file_put_contents( $tmp . '/index.php', "<?php\n" );
 
 // WP function stubs used at load time / in the functions under test.
-$GLOBALS['wp_yac_hooks'] = array();
-function register_activation_hook( $f, $cb )   { $GLOBALS['wp_yac_hooks']['activate'] = $cb; }
-function register_deactivation_hook( $f, $cb ) { $GLOBALS['wp_yac_hooks']['deactivate'] = $cb; }
-function register_uninstall_hook( $f, $cb )    { $GLOBALS['wp_yac_hooks']['uninstall'] = $cb; }
-function add_action( $hook, $cb )              { $GLOBALS['wp_yac_hooks'][ $hook ] = $cb; }
+$GLOBALS['yac_ocache_hooks'] = array();
+function register_activation_hook( $f, $cb )   { $GLOBALS['yac_ocache_hooks']['activate'] = $cb; }
+function register_deactivation_hook( $f, $cb ) { $GLOBALS['yac_ocache_hooks']['deactivate'] = $cb; }
+function register_uninstall_hook( $f, $cb )    { $GLOBALS['yac_ocache_hooks']['uninstall'] = $cb; }
+function add_action( $hook, $cb )              { $GLOBALS['yac_ocache_hooks'][ $hook ] = $cb; }
 function is_admin() { return true; }
 function is_multisite() { return false; }
 
@@ -58,22 +58,22 @@ function number_format_i18n( $n, $dec = 0 ) { return number_format( $n, $dec ); 
 function plugin_dir_url( $f ) { return 'https://example.test/wp-content/plugins/' . basename( dirname( $f ) ) . '/'; }
 
 // Load the plugin shell.
-require __DIR__ . '/../wp-yac.php';
+require __DIR__ . '/../yac-ocache.php';
 
 // --- Tests -------------------------------------------------------------------
 
 check( 'plugin file loads without error', true );
-check( 'activation hook registered', isset( $GLOBALS['wp_yac_hooks']['activate'] ) );
-check( 'uninstall hook registered', isset( $GLOBALS['wp_yac_hooks']['uninstall'] ) );
+check( 'activation hook registered', isset( $GLOBALS['yac_ocache_hooks']['activate'] ) );
+check( 'uninstall hook registered', isset( $GLOBALS['yac_ocache_hooks']['uninstall'] ) );
 
 // Deploy: no object-cache.php present -> should copy the drop-in in.
-$ok = wp_yac_deploy_dropin();
+$ok = yac_ocache_deploy_dropin();
 check( 'deploy_dropin returns true', $ok === true );
 check( 'drop-in file created in wp-content', file_exists( WP_CONTENT_DIR . '/object-cache.php' ) );
-check( 'dropin_is_ours detects our marker', wp_yac_dropin_is_ours() === true );
+check( 'dropin_is_ours detects our marker', yac_ocache_dropin_is_ours() === true );
 
 // Status should not error out.
-$status = wp_yac_status();
+$status = yac_ocache_status();
 check( 'status returns rows', is_array( $status ) && count( $status ) >= 4 );
 
 $found_dropin_ok = false;
@@ -93,7 +93,7 @@ $foreign_head = file_get_contents( $foreign_dir . '/object-cache.php', false, nu
 check( 'foreign drop-in is not detected as ours', strpos( $foreign_head, 'Yac Object Cache' ) === false );
 
 // Uninstall removes our drop-in.
-call_user_func( $GLOBALS['wp_yac_hooks']['uninstall'] );
+call_user_func( $GLOBALS['yac_ocache_hooks']['uninstall'] );
 check( 'uninstall removed the drop-in', ! file_exists( WP_CONTENT_DIR . '/object-cache.php' ) );
 
 // Cleanup.

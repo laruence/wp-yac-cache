@@ -1,11 +1,11 @@
 ( function() {
-	var mask = document.getElementById( 'wp-yac-modal' ),
-		keyEl  = document.getElementById( 'wp-yac-modal-key' ),
-		metaEl = document.getElementById( 'wp-yac-modal-meta' ),
-		bodyEl = document.getElementById( 'wp-yac-modal-body' ),
-		delEl  = document.getElementById( 'wp-yac-modal-delete' ),
-		ajaxurl = ( window.WP_YAC_CONFIG && WP_YAC_CONFIG.ajaxUrl ) || '',
-		nonce   = ( window.WP_YAC_CONFIG && WP_YAC_CONFIG.entryNonce ) || '',
+	var mask = document.getElementById( 'yac-ocache-modal' ),
+		keyEl  = document.getElementById( 'yac-ocache-modal-key' ),
+		metaEl = document.getElementById( 'yac-ocache-modal-meta' ),
+		bodyEl = document.getElementById( 'yac-ocache-modal-body' ),
+		delEl  = document.getElementById( 'yac-ocache-modal-delete' ),
+		ajaxurl = ( window.YAC_OCACHE_CONFIG && YAC_OCACHE_CONFIG.ajaxUrl ) || '',
+		nonce   = ( window.YAC_OCACHE_CONFIG && YAC_OCACHE_CONFIG.entryNonce ) || '',
 		cur = null, curRow = null;
 
 	function esc( s ) {
@@ -47,7 +47,7 @@
 		metaEl.innerHTML = '<li><span>Loading…</span><strong></strong></li>';
 		bodyEl.textContent = '';
 		mask.hidden = false;
-		send( 'wp_yac_entry', function( res ) {
+		send( 'yac_ocache_entry', function( res ) {
 			if ( ! res.success || ! res.data ) {
 				metaEl.innerHTML = '<li><span>Could not load the entry.</span><strong></strong></li>';
 				return;
@@ -77,24 +77,24 @@
 	}
 
 	document.addEventListener( 'click', function( e ) {
-		var tab = e.target.closest ? e.target.closest( '.wp-yac-tab' ) : null;
+		var tab = e.target.closest ? e.target.closest( '.yac-ocache-tab' ) : null;
 		if ( tab ) {
-			var list = tab.getAttribute( 'data-wp-yac-list' );
-			document.querySelectorAll( '.wp-yac-tab' ).forEach( function( b ) {
+			var list = tab.getAttribute( 'data-yac-ocache-list' );
+			document.querySelectorAll( '.yac-ocache-tab' ).forEach( function( b ) {
 				b.classList.toggle( 'is-active', b === tab );
 				b.setAttribute( 'aria-selected', b === tab ? 'true' : 'false' );
 			} );
-			document.querySelectorAll( '.wp-yac-entry-list' ).forEach( function( ul ) {
-				ul.classList.toggle( 'is-hidden', ul.getAttribute( 'data-wp-yac-list' ) !== list );
+			document.querySelectorAll( '.yac-ocache-entry-list' ).forEach( function( ul ) {
+				ul.classList.toggle( 'is-hidden', ul.getAttribute( 'data-yac-ocache-list' ) !== list );
 			} );
 			return;
 		}
-		var t = e.target.closest ? e.target.closest( '.wp-yac-entry-inspect' ) : null;
+		var t = e.target.closest ? e.target.closest( '.yac-ocache-entry-inspect' ) : null;
 		if ( t ) {
 			open( t.getAttribute( 'data-key' ), t.closest( 'li' ) );
 			return;
 		}
-		if ( e.target === mask || ( e.target.closest && e.target.closest( '[data-wp-yac-close]' ) ) ) {
+		if ( e.target === mask || ( e.target.closest && e.target.closest( '[data-yac-ocache-close]' ) ) ) {
 			close();
 		}
 	} );
@@ -102,7 +102,7 @@
 		if ( ! cur ) {
 			return;
 		}
-		send( 'wp_yac_entry_delete', function( res ) {
+		send( 'yac_ocache_entry_delete', function( res ) {
 			if ( res.success && res.data && res.data.deleted && curRow && curRow.parentNode ) {
 				curRow.parentNode.removeChild( curRow );
 			}

@@ -10,7 +10,7 @@
  *   fit Yac's 48-byte limit (instance prefix included); over-long keys
  *   keep the group verbatim and hash (crc32b) only the key part, so
  *   dumps and the dashboard pie chart stay attributable by group.
- * - WP_YAC_SKIP_EMPTY (default on, the single pollution filter): bots
+ * - YAC_OCACHE_SKIP_EMPTY (default on, the single pollution filter): bots
  *   probe unbounded one-off URLs, and each 404 path mints a
  *   get_page_by_path:<md5> key whose value is an empty negative result
  *   never re-read, yet each occupies a slot — those empty values stay
@@ -19,7 +19,7 @@
  *   and keep being shared; when their working set outgrows the slot
  *   table, the remedy is a bigger yac.keys_memory_size, not skipping.
  * - Keys carry no per-blog prefix: single-node installs are the target
- *   and per-site isolation lives in WP_YAC_KEY_PREFIX instead. Installs
+ *   and per-site isolation lives in YAC_OCACHE_KEY_PREFIX instead. Installs
  *   sharing one PHP pool must use different prefixes; multisite blogs
  *   share the namespace by design.
  * - wp_cache_flush() calls Yac::flush() and clears the ENTIRE shared
@@ -41,18 +41,30 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-if ( ! defined( 'WP_YAC_KEY_PREFIX' ) ) {
+/* backwards compatibility: the constant was WP_YAC_* before the
+   yac_ocache_ rename; a wp-config.php define keeps working */
+if ( ! defined( 'YAC_OCACHE_KEY_PREFIX' ) && defined( 'WP_YAC_KEY_PREFIX' ) ) {
+	define( 'YAC_OCACHE_KEY_PREFIX', WP_YAC_KEY_PREFIX );
+}
+if ( ! defined( 'YAC_OCACHE_SKIP_EMPTY' ) && defined( 'WP_YAC_SKIP_EMPTY' ) ) {
+	define( 'YAC_OCACHE_SKIP_EMPTY', WP_YAC_SKIP_EMPTY );
+}
+if ( ! defined( 'YAC_OCACHE_DISABLE' ) && defined( 'WP_YAC_DISABLE' ) ) {
+	define( 'YAC_OCACHE_DISABLE', WP_YAC_DISABLE );
+}
+
+if ( ! defined( 'YAC_OCACHE_KEY_PREFIX' ) ) {
 	/* human readable part of the storage key; 0-6 chars, shorter is
 	   better: every byte here shrinks the room for the logical key */
-	define( 'WP_YAC_KEY_PREFIX', 'wp' );
+	define( 'YAC_OCACHE_KEY_PREFIX', 'wp' );
 }
 
-if ( ! defined( 'WP_YAC_DROPIN_VERSION' ) ) {
-	define( 'WP_YAC_DROPIN_VERSION', '1.1.1' );
+if ( ! defined( 'YAC_OCACHE_DROPIN_VERSION' ) ) {
+	define( 'YAC_OCACHE_DROPIN_VERSION', '1.2.0' );
 }
 
-if ( ! defined( 'WP_YAC_SKIP_EMPTY' ) ) {
-	define( 'WP_YAC_SKIP_EMPTY', true );
+if ( ! defined( 'YAC_OCACHE_SKIP_EMPTY' ) ) {
+	define( 'YAC_OCACHE_SKIP_EMPTY', true );
 }
 
 function wp_cache_add( $key, $data, $group = '', $expire = 0 ) {
@@ -110,7 +122,7 @@ function wp_cache_get_multi( $groups ) {
 function wp_cache_init() {
 	global $wp_object_cache;
 
-	$wp_object_cache = new WP_Object_Cache();
+	$wp_object_cache = new Yac_Ocache_Object_Cache();
 }
 
 function wp_cache_replace( $key, $data, $group = '', $expire = 0 ) {
@@ -209,7 +221,7 @@ if ( ! function_exists( 'wp_cache_flush_group' ) ) {
 	}
 }
 
-class WP_Object_Cache {
+class Yac_Ocache_Object_Cache {
 
 	private $yac = null; /* data store; null => runtime-only mode */
 
@@ -248,11 +260,11 @@ class WP_Object_Cache {
 		);
 
 		/* the prefix is the only isolation between installs sharing one
-		   PHP pool — use a different WP_YAC_KEY_PREFIX per site. Keys
+		   PHP pool — use a different YAC_OCACHE_KEY_PREFIX per site. Keys
 		   carry no per-blog prefix; multisite blogs share the namespace
 		   by design. Budget = key bytes left inside YAC_MAX_KEY_LEN
 		   (48 incl. prefix) */
-		$this->storage_prefix = substr( preg_replace( '/[^A-Za-z0-9_]/', '', (string) WP_YAC_KEY_PREFIX ), 0, 6 ) . ':';
+		$this->storage_prefix = substr( preg_replace( '/[^A-Za-z0-9_]/', '', (string) YAC_OCACHE_KEY_PREFIX ), 0, 6 ) . ':';
 
 		if ( defined( 'YAC_MAX_KEY_LEN' ) ) {
 			$this->logical_key_budget = max( 8, YAC_MAX_KEY_LEN - strlen( $this->storage_prefix ) );
@@ -262,7 +274,7 @@ class WP_Object_Cache {
 	}
 
 	private function init_yac() {
-		if ( defined( 'WP_YAC_DISABLE' ) && WP_YAC_DISABLE ) {
+		if ( defined( 'YAC_OCACHE_DISABLE' ) && YAC_OCACHE_DISABLE ) {
 			return;
 		}
 		if ( ! extension_loaded( 'yac' ) || ! class_exists( 'Yac' ) ) {
@@ -733,7 +745,7 @@ class WP_Object_Cache {
 	   per-entity negative caches keep sharing — when those outgrow the
 	   table, raise keys_memory_size */
 	private function shm_write_skip( $id, $group, $data ) {
-		if ( ! WP_YAC_SKIP_EMPTY ) {
+		if ( ! YAC_OCACHE_SKIP_EMPTY ) {
 			return false;
 		}
 
@@ -770,13 +782,13 @@ class WP_Object_Cache {
 
 	public function stats() {
 		echo '<h3>This request</h3>';
-		echo '<ul class="wp-yac-op-list">';
+		echo '<ul class="yac-ocache-op-list">';
 		echo '<li><span>Backend</span><strong>' . ( $this->yac_available ? 'shared memory' : 'runtime-only fallback' ) . '</strong></li>';
 		echo '<li><span>Query time</span><strong>' . esc_html( number_format( $this->time_total * 1000, 1 ) ) . ' ms</strong></li>';
 		echo '</ul>';
 
 		echo '<h3>Operations</h3>';
-		echo '<ul class="wp-yac-op-list">';
+		echo '<ul class="yac-ocache-op-list">';
 		foreach ( $this->stats as $stat => $n ) {
 			if ( empty( $n ) || 'slow-ops' === $stat ) {
 				continue;
@@ -786,14 +798,14 @@ class WP_Object_Cache {
 		echo '</ul>';
 
 		if ( ! empty( $this->stats['slow-ops'] ) ) {
-			echo '<p class="wp-yac-note">' . esc_html( sprintf( '%d slow operations (> 5 ms)', $this->stats['slow-ops'] ) ) . '</p>';
+			echo '<p class="yac-ocache-note">' . esc_html( sprintf( '%d slow operations (> 5 ms)', $this->stats['slow-ops'] ) ) . '</p>';
 		}
 
 		if ( $this->yac_available ) {
 			$info = $this->yac->info();
 			if ( is_array( $info ) ) {
 				echo '<h3>Shared storage (all workers)</h3>';
-				echo '<ul class="wp-yac-op-list">';
+				echo '<ul class="yac-ocache-op-list">';
 				echo '<li><span>Slots in use</span><strong>' . esc_html( number_format_i18n( $info['slots_used'] ) . ' / ' . number_format_i18n( $info['slots_size'] ) ) . '</strong></li>';
 				echo '<li><span>Values memory pool</span><strong>' . esc_html( size_format( $info['values_memory_size'], 2 ) ) . '</strong></li>';
 				echo '</ul>';
@@ -807,11 +819,11 @@ class WP_Object_Cache {
 			}
 
 			echo '<h3>Operations by group</h3>';
-			echo '<p class="wp-yac-note">' . esc_html( 'Cache operations of this request, grouped by WordPress cache group (options, posts, users, …). The bar shows each group’s share of the shared-memory traffic; long bars point at the groups this page load touched the most.' ) . '</p>';
-			echo '<ul class="wp-yac-group-bars">';
+			echo '<p class="yac-ocache-note">' . esc_html( 'Cache operations of this request, grouped by WordPress cache group (options, posts, users, …). The bar shows each group’s share of the shared-memory traffic; long bars point at the groups this page load touched the most.' ) . '</p>';
+			echo '<ul class="yac-ocache-group-bars">';
 			foreach ( $this->group_ops as $group => $ops ) {
-				echo '<li><span class="wp-yac-group-name" title="' . esc_attr( $group ) . '">' . esc_html( $group ) . '</span>'
-					. '<span class="wp-yac-group-bar-track"><span class="wp-yac-group-bar" style="width:' . esc_attr( round( count( $ops ) / $max * 100 ) ) . '%"></span></span>'
+				echo '<li><span class="yac-ocache-group-name" title="' . esc_attr( $group ) . '">' . esc_html( $group ) . '</span>'
+					. '<span class="yac-ocache-group-bar-track"><span class="yac-ocache-group-bar" style="width:' . esc_attr( round( count( $ops ) / $max * 100 ) ) . '%"></span></span>'
 					. '<strong>' . esc_html( number_format_i18n( count( $ops ) ) ) . '</strong></li>';
 			}
 			echo '</ul>';

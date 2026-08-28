@@ -4,19 +4,19 @@
 # Whitelist, not blacklist: only files that belong in the installed plugin
 # are packaged. Tests, docs and development files never get in by accident.
 #
-# Usage: scripts/build-release.sh [output.zip]   (default dist/wp-yac-cache.zip)
+# Usage: scripts/build-release.sh [output.zip]   (default dist/yac-ocache.zip)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-FILES=(wp-yac.php object-cache.php readme.txt LICENSE assets/wp-yac.css assets/wp-yac-notice.js assets/wp-yac-admin.js)
-OUT="${1:-dist/wp-yac-cache.zip}"
+FILES=(yac-ocache.php object-cache.php readme.txt LICENSE assets/yac-ocache.css assets/yac-ocache-notice.js assets/yac-ocache-admin.js)
+OUT="${1:-dist/yac-ocache.zip}"
 
 for f in "${FILES[@]}"; do
 	[ -f "$f" ] || { echo "error: release file missing: $f" >&2; exit 1; }
 done
 
-php -l wp-yac.php
+php -l yac-ocache.php
 php -l object-cache.php
 
 # wordpress.org rejects readmes larger than 10k

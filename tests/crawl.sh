@@ -7,16 +7,16 @@
 # Usage: tests/crawl.sh [pages]   (default 100)
 #
 # Target site is configured via env vars, e.g.:
-#   WP_YAC_CRAWL_HOST=user@example.com WP_YAC_CRAWL_DOCROOT=/var/www/html \
-#   WP_YAC_CRAWL_SITE=https://example.com tests/crawl.sh
+#   YAC_OCACHE_CRAWL_HOST=user@example.com YAC_OCACHE_CRAWL_DOCROOT=/var/www/html \
+#   YAC_OCACHE_CRAWL_SITE=https://example.com tests/crawl.sh
 set -euo pipefail
 
-HOST=${WP_YAC_CRAWL_HOST:?set WP_YAC_CRAWL_HOST (ssh target, e.g. user@example.com)}
-DOCROOT=${WP_YAC_CRAWL_DOCROOT:?set WP_YAC_CRAWL_DOCROOT (web root on the target)}
-SITE=${WP_YAC_CRAWL_SITE:?set WP_YAC_CRAWL_SITE (public URL of the site)}
+HOST=${YAC_OCACHE_CRAWL_HOST:?set YAC_OCACHE_CRAWL_HOST (ssh target, e.g. user@example.com)}
+DOCROOT=${YAC_OCACHE_CRAWL_DOCROOT:?set YAC_OCACHE_CRAWL_DOCROOT (web root on the target)}
+SITE=${YAC_OCACHE_CRAWL_SITE:?set YAC_OCACHE_CRAWL_SITE (public URL of the site)}
 PAGES=${1:-100}
 STEP=20
-PROBE=wp-yac-slotprobe.php
+PROBE=yac-ocache-slotprobe.php
 
 TOKEN=$(head -c 16 /dev/urandom | xxd -p)
 
@@ -58,7 +58,7 @@ echo "baseline:  $(probe)"
 
 i=0
 while IFS= read -r url && [ "$i" -lt "$PAGES" ]; do
-	code=$(curl -s -o /dev/null -w '%{http_code}' -A 'wp-yac-crawl/1.0' "$url")
+	code=$(curl -s -o /dev/null -w '%{http_code}' -A 'yac-ocache-crawl/1.0' "$url")
 	i=$((i + 1))
 	if [ $(( i % STEP )) -eq 0 ]; then
 		echo "after $(printf '%3d' "$i") pages (last [$code] $url): $(probe)"

@@ -23,8 +23,8 @@ Best fit is single-node (or few-node) WordPress installs.
   over-long keys keep
   the group verbatim and hash (crc32b) only the key part, so dumps and the
   dashboard pie chart stay attributable by group. Configurable prefix via
-  `WP_YAC_KEY_PREFIX`
-- **Pollution guard** — `WP_YAC_SKIP_EMPTY` (on by default, the single
+  `YAC_OCACHE_KEY_PREFIX`
+- **Pollution guard** — `YAC_OCACHE_SKIP_EMPTY` (on by default, the single
   filter) keeps empty `get_page_by_path:` negatives (bot 404 probes,
   never re-read) request-local
 - **False-safe** — a stored `false` is coerced to `0` before writing to
@@ -33,7 +33,7 @@ Best fit is single-node (or few-node) WordPress installs.
 - **Admin dashboard** — live stats, health advice and self-test, see
   [Dashboard](#dashboard)
 - **Multisite aware** — keys carry no per-blog prefix; isolation between
-  installs sharing one PHP pool lives in `WP_YAC_KEY_PREFIX`; multisite
+  installs sharing one PHP pool lives in `YAC_OCACHE_KEY_PREFIX`; multisite
   blogs share one namespace (run separate installs when they must not)
 - **Graceful degradation** — without the Yac extension the drop-in falls back
   to a per-request cache and WordPress keeps working
@@ -108,12 +108,12 @@ extension=yac.so
 ### Via WP-CLI
 
 ```bash
-wp plugin install https://github.com/laruence/wordpress-yac-cache/releases/latest/download/wp-yac-cache.zip --activate
+wp plugin install https://github.com/laruence/wordpress-yac-cache/releases/latest/download/yac-ocache.zip --activate
 ```
 
 ### Via the WordPress admin
 
-Download `wp-yac-cache.zip` from the [releases page](https://github.com/laruence/wordpress-yac-cache/releases),
+Download `yac-ocache.zip` from the [releases page](https://github.com/laruence/wordpress-yac-cache/releases),
 then Plugins → Add New → Upload Plugin.
 
 (The plugin has been submitted to the WordPress.org directory and will be
@@ -125,12 +125,12 @@ In `wp-config.php`, above the "That's all, stop editing!" line:
 
 ```php
 define( 'WP_CACHE', true );
-define( 'WP_YAC_KEY_PREFIX', 'ab_' ); // unique per install when sites share one PHP pool
+define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // unique per install when sites share one PHP pool
 ```
 
 Keys carry no per-blog prefix: with a multisite install all blogs share
 one cache namespace. When sites sharing one PHP pool must not see each
-other's entries, give each its own `WP_YAC_KEY_PREFIX`.
+other's entries, give each its own `YAC_OCACHE_KEY_PREFIX`.
 
 Check **Tools → Yac Object Cache** for status, stats and flush actions.
 
@@ -159,8 +159,8 @@ yac.values_memory_size = 64M   ; raise for large sites (alloptions!)
 
 ```php
 ; wp-config.php escape hatches
-define( 'WP_YAC_DISABLE', true );    // force runtime-only mode
-define( 'WP_YAC_KEY_PREFIX', 'wp' ); // key prefix, 0-6 chars; per-site isolation when sharing a PHP pool
+define( 'YAC_OCACHE_DISABLE', true );    // force runtime-only mode
+define( 'YAC_OCACHE_KEY_PREFIX', 'wp' ); // key prefix, 0-6 chars; per-site isolation when sharing a PHP pool
 
 // The single pollution filter: bots probe unbounded one-off URLs and
 // each 404 path mints a get_page_by_path:<md5> key whose value is an
@@ -170,7 +170,7 @@ define( 'WP_YAC_KEY_PREFIX', 'wp' ); // key prefix, 0-6 chars; per-site isolatio
 // adjacent posts...) ARE re-read on every view and keep being shared;
 // when their working set outgrows the slot table, the remedy is a
 // bigger yac.keys_memory_size (the dashboard says so), not skipping.
-define( 'WP_YAC_SKIP_EMPTY', true );
+define( 'YAC_OCACHE_SKIP_EMPTY', true );
 ```
 
 ## Benchmarks

@@ -1,7 +1,7 @@
 <?php
 /**
  * Admin-page render test: stub WordPress, fake the Yac extension and render
- * wp_yac_render_admin_page() across the health-verdict scenarios, asserting
+ * yac_ocache_render_admin_page() across the health-verdict scenarios, asserting
  * on the key markup.
  *
  * Run:
@@ -28,16 +28,16 @@ function check( $label, $cond ) {
 // --- Minimal WordPress stubs -------------------------------------------------
 
 define( 'ABSPATH', sys_get_temp_dir() . '/' );
-define( 'WP_CONTENT_DIR', sys_get_temp_dir() . '/wp-yac-render-' . getmypid() );
+define( 'WP_CONTENT_DIR', sys_get_temp_dir() . '/yac-ocache-render-' . getmypid() );
 define( 'WP_CACHE', true );
 @mkdir( WP_CONTENT_DIR, 0777, true );
 
-$GLOBALS['wp_yac_hooks'] = array();
+$GLOBALS['yac_ocache_hooks'] = array();
 function register_activation_hook( $f, $cb )   {}
 function register_deactivation_hook( $f, $cb ) {}
 function register_uninstall_hook( $f, $cb )    {}
 function add_action( $hook, $cb )              {}
-function plugin_dir_url( $f ) { return 'http://example.com/wp-content/plugins/wp-yac-cache/'; }
+function plugin_dir_url( $f ) { return 'http://example.com/wp-content/plugins/yac-ocache-cache/'; }
 function is_admin() { return true; }
 function is_multisite() { return false; }
 function current_user_can( $cap ) { return true; }
@@ -68,10 +68,10 @@ function get_bloginfo( $show ) { return '6.9-test'; }
 function wp_rand() { return mt_rand(); }
 
 // --- Storage fixture -----------------------------------------------------------
-// wp_yac_storage_info() checks $GLOBALS['wp_yac_test_storage_info'] first, so
+// yac_ocache_storage_info() checks $GLOBALS['yac_ocache_test_storage_info'] first, so
 // the real extension (if loaded) is bypassed entirely. Same for the snapshot.
 
-require __DIR__ . '/../wp-yac.php';
+require __DIR__ . '/../yac-ocache.php';
 
 function fake_info( $over = array() ) {
 	return array_merge( array(
@@ -120,51 +120,51 @@ function fake_snapshot( $over = array() ) {
 
 function render_page() {
 	ob_start();
-	wp_yac_render_admin_page();
+	yac_ocache_render_admin_page();
 	return ob_get_clean();
 }
 
 // --- Scenario 1: green — slots and values far from full -----------------------
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 1262,
 	'hits'       => 50000,
 	'miss'       => 3000,
 ) );
-$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot();
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot();
 
 $html = render_page();
 
-check( 'health donut rendered', strpos( $html, 'wp-yac-health-donut' ) !== false );
+check( 'health donut rendered', strpos( $html, 'yac-ocache-health-donut' ) !== false );
 check( 'donut shows hit rate', strpos( $html, '94.3%' ) !== false );
 check( 'healthy chip shown', strpos( $html, 'Healthy' ) !== false );
-check( 'green renders no advice', strpos( $html, 'class="wp-yac-advice' ) === false );
-check( 'health bars rendered', strpos( $html, 'wp-yac-bars' ) !== false );
+check( 'green renders no advice', strpos( $html, 'class="yac-ocache-advice' ) === false );
+check( 'health bars rendered', strpos( $html, 'yac-ocache-bars' ) !== false );
 check( 'missing drop-in reported in problem table', strpos( $html, 'FAIL' ) !== false );
-check( 'configuration rendered as table', strpos( $html, 'wp-yac-config-table' ) !== false );
+check( 'configuration rendered as table', strpos( $html, 'yac-ocache-config-table' ) !== false );
 check( 'config table lists directives', strpos( $html, 'yac.keys_memory_size' ) !== false );
 check( 'legacy counters panel removed', strpos( $html, '>Counters<' ) === false );
 check( 'memory contents panel rendered', strpos( $html, 'Shared memory contents' ) !== false );
-check( 'largest keys are clickable', strpos( $html, 'wp-yac-entry-inspect' ) !== false && strpos( $html, 'data-key="wp_x:options:alloptions"' ) !== false );
-check( 'hottest tab rendered when dump reports hits', strpos( $html, 'wp-yac-tab' ) !== false && strpos( $html, '>Hottest<' ) !== false );
-check( 'hottest list hidden by default', strpos( $html, 'wp-yac-entry-list is-hidden' ) !== false );
+check( 'largest keys are clickable', strpos( $html, 'yac-ocache-entry-inspect' ) !== false && strpos( $html, 'data-key="wp_x:options:alloptions"' ) !== false );
+check( 'hottest tab rendered when dump reports hits', strpos( $html, 'yac-ocache-tab' ) !== false && strpos( $html, '>Hottest<' ) !== false );
+check( 'hottest list hidden by default', strpos( $html, 'yac-ocache-entry-list is-hidden' ) !== false );
 check( 'hottest caption names the hit ceiling', strpos( $html, 'top 1,200 hits' ) !== false );
-check( 'entry inspector modal rendered', strpos( $html, 'wp-yac-modal' ) !== false );
+check( 'entry inspector modal rendered', strpos( $html, 'yac-ocache-modal' ) !== false );
 check( 'occupied metric uses padded size', strpos( $html, 'Occupied' ) !== false );
-check( 'group pie rendered', strpos( $html, 'wp-yac-pie' ) !== false );
+check( 'group pie rendered', strpos( $html, 'yac-ocache-pie' ) !== false );
 check( 'config lists wp-config directives first', strpos( $html, 'WP_CACHE' ) < strpos( $html, 'yac.enable' ) );
-check( 'legacy card row removed', strpos( $html, 'class="wp-yac-cards' ) === false );
+check( 'legacy card row removed', strpos( $html, 'class="yac-ocache-cards' ) === false );
 check( 'legacy values-health panel removed', strpos( $html, 'Values memory health' ) === false );
 check( 'legacy recycle scare removed', strpos( $html, 'Memory pressure' ) === false );
 
 // --- Scenario 1b: cold cache — warm-up state, no verdict ---------------------
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 120,
 	'hits'       => 600,
 	'miss'       => 300,
 ) );
-$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot( array( 'entries' => 120, 'own' => 120 ) );
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 120, 'own' => 120 ) );
 
 $html = render_page();
 
@@ -173,17 +173,17 @@ check( 'warm-up donut sub caption', strpos( $html, '>warming up<' ) !== false );
 check( 'warm-up chip shown', strpos( $html, 'Warming up' ) !== false );
 check( 'warm-up explains the threshold', strpos( $html, 'Warming up — the cache just started' ) !== false );
 check( 'warm-up shows lookups progress', strpos( $html, '(900 so far)' ) !== false );
-check( 'warm-up renders no colored verdict advice', strpos( $html, 'class="wp-yac-advice-warn' ) === false && strpos( $html, 'class="wp-yac-advice-err' ) === false );
+check( 'warm-up renders no colored verdict advice', strpos( $html, 'class="yac-ocache-advice-warn' ) === false && strpos( $html, 'class="yac-ocache-advice-err' ) === false );
 check( 'warm-up bars stay neutral', strpos( $html, 'background: #8c8f94' ) !== false );
 
 ob_start();
-wp_yac_render_dashboard_widget();
+yac_ocache_render_dashboard_widget();
 $widget_warm = ob_get_clean();
 check( 'widget shows N/A while warming up', strpos( $widget_warm, '>N/A<' ) !== false && strpos( $widget_warm, 'warming up' ) !== false );
 
 // --- Scenario 1c: warm-up threshold reached — the verdict starts --------------
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 120,
 	'hits'       => 950,
 	'miss'       => 50,
@@ -195,13 +195,13 @@ check( 'verdict starts once the threshold is reached', strpos( $html, '95%' ) !=
 
 // --- Scenario 2: keys full, hit rate 80% — yellow keys advice ------------------
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 30100,
 	'hits'       => 80000,
 	'miss'       => 20000,
 	'kicks'      => 9000,
 ) );
-$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot( array( 'entries' => 30100, 'own' => 30100 ) );
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 30100, 'own' => 30100 ) );
 
 $html = render_page();
 
@@ -211,7 +211,7 @@ check( 'kicks bar carries miss attribution', strpos( $html, '% of misses' ) !== 
 
 // --- Scenario 3: keys full, hit rate 50% — red ---------------------------------
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 30100,
 	'hits'       => 50000,
 	'miss'       => 50000,
@@ -222,17 +222,17 @@ $html = render_page();
 
 check( 'red critical chip', strpos( $html, 'Critical' ) !== false );
 check( 'strong keys advice shown', strpos( $html, 'Strongly raise' ) !== false );
-check( 'red advice style', strpos( $html, 'wp-yac-advice-err' ) !== false );
+check( 'red advice style', strpos( $html, 'yac-ocache-advice-err' ) !== false );
 
 // --- Scenario 4: keys not full, values full — yellow values advice -------------
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 1262,
 	'hits'       => 30000,
 	'miss'       => 10000,
 	'recycles'   => 8000,
 ) );
-$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot( array( 'occupied' => 64000000 ) );
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'occupied' => 64000000 ) );
 
 $html = render_page();
 
@@ -241,23 +241,23 @@ check( 'values-full advice shown', strpos( $html, 'Keys not full but values full
 // --- Scenario 5: keys 49%, kicks far above uniform expectation, rate < 90 ----
 // inserts = 16000 + 3000 = 19000, observed = 15.8%, expected = 0.488^4/5 ~= 1.1%
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 16000,
 	'hits'       => 85000,
 	'miss'       => 15000,
 	'kicks'      => 3000,
 ) );
-$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot( array( 'entries' => 16000, 'own' => 16000 ) );
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 16000, 'own' => 16000 ) );
 
 $html = render_page();
 
 check( 'distribution anomaly advice shown', strpos( $html, 'placement is unlucky' ) !== false );
-check( 'distribution advice offers prefix re-roll', strpos( $html, 'WP_YAC_KEY_PREFIX' ) !== false );
+check( 'distribution advice offers prefix re-roll', strpos( $html, 'YAC_OCACHE_KEY_PREFIX' ) !== false );
 check( 'distribution advice offers more slots too', strpos( $html, 'yac.keys_memory_size' ) !== false );
 
 // --- Scenario 5b: same kick creep but healthy rate stays green ----------------
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 16000,
 	'hits'       => 95000,
 	'miss'       => 5000,
@@ -266,13 +266,13 @@ $GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
 
 $html = render_page();
 
-check( 'harmless long-uptime kick creep stays green', strpos( $html, 'class="wp-yac-advice' ) === false );
+check( 'harmless long-uptime kick creep stays green', strpos( $html, 'class="yac-ocache-advice' ) === false );
 
 // --- Scenario 6: keys 80%, moderate kicks, eviction-driven misses --------------
 // observed = 4000/30214 ~= 13.2% < 3*E(8.2%)=24.6% so distribution stays quiet;
 // kicks/misses = 44% >= 1/3 with rate 87% -> early slot pressure
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 26214,
 	'hits'       => 60000,
 	'miss'       => 9000,
@@ -285,12 +285,12 @@ check( 'early slot pressure advice shown', strpos( $html, 'slot pressure arrives
 
 // --- Scenario 7: mostly foreign entries — shared-pool occupancy ----------------
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 20000,
 	'hits'       => 50000,
 	'miss'       => 3000,
 ) );
-$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot( array( 'entries' => 20000, 'own' => 6000 ) );
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 20000, 'own' => 6000 ) );
 
 $html = render_page();
 
@@ -298,16 +298,16 @@ check( 'shared-pool advice shown', strpos( $html, 'shared-pool occupancy' ) !== 
 
 // --- Scenario 8: drop-in version check -----------------------------------------
 
-file_put_contents( WP_YAC_DROPIN_DEST, file_get_contents( WP_YAC_DROPIN_SOURCE ) );
-$version = wp_yac_dropin_version();
-check( 'drop-in version parsed from file', $version === WP_YAC_VERSION );
+file_put_contents( YAC_OCACHE_DROPIN_DEST, file_get_contents( YAC_OCACHE_DROPIN_SOURCE ) );
+$version = yac_ocache_dropin_version();
+check( 'drop-in version parsed from file', $version === YAC_OCACHE_VERSION );
 
-$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 1262,
 	'hits'       => 50000,
 	'miss'       => 3000,
 ) );
-$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot();
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot();
 
 $html = render_page();
 check( 'status shows drop-in up to date', strpos( $html, 'up to date' ) !== false );
@@ -315,7 +315,7 @@ check( 'no update button when versions match', strpos( $html, 'Update drop-in' )
 
 // --- Scenario 9: fully healthy status collapses to the active bar ------------
 
-$GLOBALS['wp_yac_test_status'] = array(
+$GLOBALS['yac_ocache_test_status'] = array(
 	array( 'dropin', 'ok', 'object-cache.php drop-in deployed by Yac.' ),
 	array( 'dropin_version', 'ok', 'Drop-in v1.0 is up to date.' ),
 	array( 'wp_cache', 'ok', 'WP_CACHE is enabled.' ),
@@ -325,12 +325,12 @@ $GLOBALS['wp_yac_test_status'] = array(
 $html = render_page();
 check( 'healthy status collapses to active bar', strpos( $html, 'Active' ) !== false );
 check( 'healthy status shows no problem rows', strpos( $html, 'FAIL' ) === false && strpos( $html, '>WARN<' ) === false );
-check( 'round trip folded into Active bar', ! wp_yac_backend_usable() || strpos( $html, 'round trip' ) !== false );
+check( 'round trip folded into Active bar', ! yac_ocache_backend_usable() || strpos( $html, 'round trip' ) !== false );
 
 // --- Dashboard widget -------------------------------------------------------
 
 ob_start();
-wp_yac_render_dashboard_widget();
+yac_ocache_render_dashboard_widget();
 $widget_html = ob_get_clean();
 check( 'dashboard widget renders hit rate', strpos( $widget_html, 'hit rate' ) !== false );
 check( 'dashboard widget links to full dashboard', strpos( $widget_html, 'Full dashboard' ) !== false );
@@ -367,7 +367,7 @@ $fake->store['wp:options:alloptions'] = array(
 	'ttl'   => 0,
 );
 
-$d = wp_yac_entry_detail( $fake, 'wp:options:alloptions' );
+$d = yac_ocache_entry_detail( $fake, 'wp:options:alloptions' );
 check( 'inspector unwraps drop-in v wrapper', strpos( $d['content'], '"blogname": "Test"' ) !== false );
 check( 'inspector reports never-expiring ttl', 0 === $d['ttl'] );
 check( 'inspector reports missing atime as null', null === $d['atime'] );
@@ -375,31 +375,31 @@ check( 'inspector formats sizes', '100 B' === $d['v_len'] || '100 KB' === $d['v_
 check( 'inspector reports c_len as null for uncompressed entries', null === $d['c_len'] );
 
 $fake->store['wp:options:alloptions']['atime'] = 1234567890;
-$d = wp_yac_entry_detail( $fake, 'wp:options:alloptions' );
+$d = yac_ocache_entry_detail( $fake, 'wp:options:alloptions' );
 check( 'inspector passes atime through when the build has it', 1234567890 === $d['atime'] );
 
 /* compressed entries (Yac >= 2.4.0 dumps): c_len is the stored compressed
    payload, v_len the original uncompressed length */
 $fake->store['wp:options:alloptions']['c_len'] = 30000;
 $fake->store['wp:options:alloptions']['v_len'] = 58470;
-$d = wp_yac_entry_detail( $fake, 'wp:options:alloptions' );
+$d = yac_ocache_entry_detail( $fake, 'wp:options:alloptions' );
 check( 'inspector reports c_len for compressed entries', '29.3 KB' === $d['c_len'] );
 check( 'inspector keeps v_len as the original size', '57.1 KB' === $d['v_len'] );
 
-$d = wp_yac_entry_detail( $fake, 'wp:nope' );
+$d = yac_ocache_entry_detail( $fake, 'wp:nope' );
 check( 'inspector reports gone entry', $d['gone'] );
 
-check( 'inspector delete removes the entry', wp_yac_entry_delete( $fake, 'wp:options:alloptions' ) && ! isset( $fake->store['wp:options:alloptions'] ) );
+check( 'inspector delete removes the entry', yac_ocache_entry_delete( $fake, 'wp:options:alloptions' ) && ! isset( $fake->store['wp:options:alloptions'] ) );
 
 // --- Dump for visual inspection ------------------------------------------------
 
 if ( getenv( 'RENDER_HTML' ) ) {
-	$GLOBALS['wp_yac_test_storage_info'] = fake_info( array(
+	$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 		'slots_used' => 13119,
 		'hits'       => 89918,
 		'miss'       => 18455,
 	) );
-	$GLOBALS['wp_yac_test_snapshot'] = fake_snapshot( array( 'entries' => 13119, 'own' => 13119 ) );
+	$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 13119, 'own' => 13119 ) );
 
 	$page = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Yac admin page preview</title>'
 		. '<style>body { background: #f0f0f1; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; margin: 20px; }</style>'
