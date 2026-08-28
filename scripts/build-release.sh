@@ -4,13 +4,13 @@
 # Whitelist, not blacklist: only files that belong in the installed plugin
 # are packaged. Tests, docs and development files never get in by accident.
 #
-# Usage: scripts/build-release.sh [output.zip]   (default dist/yac-ocache.zip)
+# Usage: scripts/build-release.sh [output.zip]   (default dist/yac-obj-cache.zip)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 FILES=(yac-ocache.php object-cache.php readme.txt LICENSE assets/yac-ocache.css assets/yac-ocache-notice.js assets/yac-ocache-admin.js)
-OUT="${1:-dist/yac-ocache.zip}"
+OUT="${1:-dist/yac-obj-cache.zip}"
 
 for f in "${FILES[@]}"; do
 	[ -f "$f" ] || { echo "error: release file missing: $f" >&2; exit 1; }
