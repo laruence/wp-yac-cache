@@ -41,18 +41,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-/* backwards compatibility: the constant was WP_YAC_* before the
-   yac_ocache_ rename; a wp-config.php define keeps working */
-if ( ! defined( 'YAC_OCACHE_KEY_PREFIX' ) && defined( 'WP_YAC_KEY_PREFIX' ) ) {
-	define( 'YAC_OCACHE_KEY_PREFIX', WP_YAC_KEY_PREFIX );
-}
-if ( ! defined( 'YAC_OCACHE_SKIP_EMPTY' ) && defined( 'WP_YAC_SKIP_EMPTY' ) ) {
-	define( 'YAC_OCACHE_SKIP_EMPTY', WP_YAC_SKIP_EMPTY );
-}
-if ( ! defined( 'YAC_OCACHE_DISABLE' ) && defined( 'WP_YAC_DISABLE' ) ) {
-	define( 'YAC_OCACHE_DISABLE', WP_YAC_DISABLE );
-}
-
 if ( ! defined( 'YAC_OCACHE_KEY_PREFIX' ) ) {
 	/* human readable part of the storage key; 0-6 chars, shorter is
 	   better: every byte here shrinks the room for the logical key */

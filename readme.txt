@@ -71,8 +71,6 @@ define( 'YAC_OCACHE_SKIP_EMPTY', false ); // filter is on by default; set false 
 define( 'YAC_OCACHE_DISABLE', true );     // emergency escape hatch: force runtime-only mode
 `
 
-**Upgrading from before 1.2.0?** The wp-config switches were renamed from `WP_YAC_*` to `YAC_OCACHE_*` (`WP_YAC_KEY_PREFIX`, `WP_YAC_SKIP_EMPTY`, `WP_YAC_DISABLE`, `WP_YAC_WARMUP_LOOKUPS`). Old defines are still honored, so nothing breaks — rename them to `YAC_OCACHE_*` when convenient.
-
 == Frequently Asked Questions ==
 
 = Do I need a Memcached or Redis server? =
@@ -103,7 +101,7 @@ Yac cannot delete entries by prefix, so a group flush clears the request-level c
 
 = 1.2.0 =
 * Renamed every plugin-owned symbol from the `wp_yac_`/`WP_YAC_`/`wp-yac-` prefixes to `yac_ocache_`/`YAC_OCACHE_`/`yac-ocache-` for WordPress.org prefix policy (the `wp_` prefix is reserved for WordPress core). The wp-config switches were renamed accordingly: `YAC_OCACHE_KEY_PREFIX`, `YAC_OCACHE_SKIP_EMPTY`, `YAC_OCACHE_DISABLE`, `YAC_OCACHE_WARMUP_LOOKUPS`.
-* Backwards compatibility: existing `WP_YAC_*` wp-config.php defines keep working (they are mapped to the new constants). The `wp_cache_*` functions and the `$wp_object_cache` global are the standard WordPress object cache API and keep their names.
+* The `wp_cache_*` functions and the `$wp_object_cache` global are the standard WordPress object cache API and keep their names.
 * WP-CLI: the commands stay `wp yac status` / `wp yac flush`; the command class is now `YAC_OCACHE_CLI_Command`.
 
 = 1.1.1 =

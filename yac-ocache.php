@@ -23,11 +23,6 @@ define( 'YAC_OCACHE_DROPIN_SOURCE', __DIR__ . '/object-cache.php' );
 define( 'YAC_OCACHE_DROPIN_DEST', WP_CONTENT_DIR . '/object-cache.php' );
 define( 'YAC_OCACHE_ADMIN_PAGE', 'yac-ocache' );
 
-/* backwards compatibility: the constants were WP_YAC_* before the
-   yac_ocache_ rename; existing wp-config.php defines keep working */
-if ( ! defined( 'YAC_OCACHE_WARMUP_LOOKUPS' ) && defined( 'WP_YAC_WARMUP_LOOKUPS' ) ) {
-	define( 'YAC_OCACHE_WARMUP_LOOKUPS', WP_YAC_WARMUP_LOOKUPS );
-}
 if ( ! defined( 'YAC_OCACHE_WARMUP_LOOKUPS' ) ) {
 	/* health metrics stay untouched until this many lookups have passed:
 	   a cold cache is dominated by compulsory first-read misses, so
@@ -113,8 +108,8 @@ function yac_ocache_dropin_is_ours() {
 		return false;
 	}
 
-	/* the loaded drop-in defines this constant; pre-rename drop-ins defined WP_YAC_DROPIN_VERSION */
-	if ( defined( 'YAC_OCACHE_DROPIN_VERSION' ) || defined( 'WP_YAC_DROPIN_VERSION' ) ) {
+	/* the loaded drop-in defines this constant */
+	if ( defined( 'YAC_OCACHE_DROPIN_VERSION' ) ) {
 		return true;
 	}
 
@@ -135,17 +130,12 @@ function yac_ocache_dropin_version() {
 		return YAC_OCACHE_DROPIN_VERSION;
 	}
 
-	/* pre-rename drop-ins defined WP_YAC_DROPIN_VERSION */
-	if ( defined( 'WP_YAC_DROPIN_VERSION' ) ) {
-		return WP_YAC_DROPIN_VERSION;
-	}
-
 	$head = file_get_contents( YAC_OCACHE_DROPIN_DEST, false, null, 0, 4096 );
-	if ( ! is_string( $head ) || ! preg_match( "/(YAC_OCACHE|WP_YAC)_DROPIN_VERSION', '([^']+)'/", $head, $m ) ) {
+	if ( ! is_string( $head ) || ! preg_match( "/YAC_OCACHE_DROPIN_VERSION', '([^']+)'/", $head, $m ) ) {
 		return null;
 	}
 
-	return $m[2];
+	return $m[1];
 }
 
 /* the drop-in's Yac instance prefix: YAC_OCACHE_KEY_PREFIX (0-6 chars,
