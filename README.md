@@ -1,6 +1,6 @@
 # Yac Object Cache For Wordpress
 
-[![CI](https://github.com/laruence/wordpress-yac-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/laruence/wordpress-yac-cache/actions/workflows/ci.yml)
+[![CI](https://github.com/laruence/wp-yac-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/laruence/wp-yac-cache/actions/workflows/ci.yml)
 
 A [Yac](https://github.com/laruence/yac) backed object cache for WordPress.
 
@@ -108,12 +108,12 @@ extension=yac.so
 ### Via WP-CLI
 
 ```bash
-wp plugin install https://github.com/laruence/wordpress-yac-cache/releases/latest/download/yac-ocache.zip --activate
+wp plugin install https://github.com/laruence/wp-yac-cache/releases/latest/download/yac-ocache.zip --activate
 ```
 
 ### Via the WordPress admin
 
-Download `yac-ocache.zip` from the [releases page](https://github.com/laruence/wordpress-yac-cache/releases),
+Download `yac-ocache.zip` from the [releases page](https://github.com/laruence/wp-yac-cache/releases),
 then Plugins → Add New → Upload Plugin.
 
 (The plugin has been submitted to the WordPress.org directory and will be
