@@ -33,5 +33,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.event.release.tag_name }}
-          files: dist/yac-ocache.zip
+          files: dist/yac-obj-cache.zip
           fail_on_unmatched_files: true

@@ -82,5 +82,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: yac-ocache
-          path: dist/yac-ocache.zip
+          name: yac-obj-cache
+          path: dist/yac-obj-cache.zip
