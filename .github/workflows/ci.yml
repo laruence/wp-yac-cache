@@ -6,6 +6,24 @@ on:
   pull_request:
 
 jobs:
+  phpcs:
+    # mirrors the sniffs WordPress.org Plugin Check runs (EscapeOutput,
+    # PrefixAllGlobals) so submission issues are caught before upload
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+
+      - name: PHPCS (WPCS: EscapeOutput + PrefixAllGlobals)
+        run: |
+          composer global require squizlabs/php_codesniffer wp-coding-standards/wpcs --no-interaction
+          "$HOME/.composer/vendor/bin/phpcs" --config-set installed_paths "$(composer global config home 2>/dev/null || echo "$HOME/.composer")/vendor/wp-coding-standards/wpcs"
+          "$HOME/.composer/vendor/bin/phpcs"
+
   test:
     runs-on: ubuntu-latest
     strategy:

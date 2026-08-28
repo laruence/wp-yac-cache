@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<!-- Local mirror of the sniffs WordPress.org Plugin Check runs, so
+     EscapeOutput / PrefixAllGlobals issues are caught before submission.
+     Run: phpcs
+     Keep this file OUT of the release zip (scripts/build-release.sh). -->
+<ruleset name="Yac Object Cache">
+	<description>WordPress.org submission-relevant checks for the Yac Object Cache plugin.</description>
+
+	<!-- The two files that ship to WordPress.org; assets are static -->
+	<file>yac-ocache.php</file>
+	<file>object-cache.php</file>
+
+	<arg value="sp"/>
+	<arg name="colors"/>
+	<arg name="extensions" value="php"/>
+
+	<!-- WPCS core: security output escaping + global/hook naming.
+	     Full WordPress standard pulls many style sniffs that the
+	     directory reviewer does not enforce; keep it targeted. -->
+	<rule ref="WordPress.Security.EscapeOutput"/>
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array" value="yac_ocache,Yac_Ocache,YAC_OCACHE"/>
+		</properties>
+	</rule>
+
+	<!-- The drop-in must implement the wp_cache_* API and the
+	     $wp_object_cache global: WordPress-owned names, not ours. -->
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedGlobalFound">
+		<exclude-pattern>object-cache\.php</exclude-pattern>
+	</rule>
+</ruleset>

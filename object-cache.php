@@ -92,7 +92,9 @@ function wp_cache_flush() {
 function wp_cache_get( $key, $group = '', $force = false, &$found = null ) {
 	global $wp_object_cache;
 
-	$value = apply_filters( 'pre_wp_cache_get', false, $key, $group, $force, $found );
+	/* "pre_wp_cache_get" is the core hook this drop-in mirrors from
+	   wp_cache_get(); the name is owned by WordPress, not this plugin */
+	$value = apply_filters( 'pre_wp_cache_get', false, $key, $group, $force, $found ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound
 	if ( false !== $value ) {
 		$found = true;
 		return $value;

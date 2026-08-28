@@ -1141,9 +1141,11 @@ function yac_ocache_render_admin_page() {
 						/* no wp_kses_post here: the post kses strip SVG tags,
 						   which would eat the ring and leave only the center
 						   text; health_donut() escapes every interpolation */
+						// phpcs:disable WordPress.Security.EscapeOutput.OutputNotEscaped
 						echo 'warmup' === $health['verdict']
 							? yac_ocache_health_donut( 0, $health_color, 'N/A', 'warming up' )
-							: yac_ocache_health_donut( $health['rate'], $health_color ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+							: yac_ocache_health_donut( $health['rate'], $health_color );
+						// phpcs:enable WordPress.Security.EscapeOutput.OutputNotEscaped
 						?>
 						<span class="yac-ocache-chip <?php echo esc_attr( $yac_ocache_chip[0] ); ?>"><?php echo esc_html( $yac_ocache_chip[1] ); ?></span>
 					</div>
