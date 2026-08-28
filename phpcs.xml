@@ -24,9 +24,16 @@
 		</properties>
 	</rule>
 
-	<!-- The drop-in must implement the wp_cache_* API and the
-	     $wp_object_cache global: WordPress-owned names, not ours. -->
+	<!-- The drop-in must implement the wp_cache_* API, the
+	     $wp_object_cache global and mirror core hooks like
+	     pre_wp_cache_get: WordPress-owned names, not ours. -->
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedFunctionFound">
+		<exclude-pattern>object-cache\.php</exclude-pattern>
+	</rule>
 	<rule ref="WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedGlobalFound">
+		<exclude-pattern>object-cache\.php</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound">
 		<exclude-pattern>object-cache\.php</exclude-pattern>
 	</rule>
 </ruleset>
