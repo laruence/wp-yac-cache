@@ -3,7 +3,7 @@
  * Plugin Name: Yac Object Cache
  * Plugin URI: https://github.com/laruence/wordpress-yac-cache
  * Description: Yac (lock-free shared memory) backed object cache for WordPress. Auto-deploys the object-cache.php drop-in on activation. No external servers: the cache lives in shared memory inherited by PHP-FPM workers.
- * Version: 1.2.0
+ * Version: 1.2.1
  * Requires at least: 5.6
  * Requires PHP: 7.0
  * Author: Xinchen Hui<laruence@php.net>
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'YAC_OCACHE_VERSION', '1.2.0' );
+define( 'YAC_OCACHE_VERSION', '1.2.1' );
 define( 'YAC_OCACHE_PLUGIN_FILE', __FILE__ );
 define( 'YAC_OCACHE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'YAC_OCACHE_DROPIN_SOURCE', __DIR__ . '/object-cache.php' );
@@ -1137,9 +1137,14 @@ function yac_ocache_render_admin_page() {
 			<div class="yac-ocache-panel">
 				<div class="yac-ocache-health">
 					<div class="yac-ocache-health-ring">
-						<?php echo wp_kses_post( 'warmup' === $health['verdict']
+						<?php
+						/* no wp_kses_post here: the post kses strip SVG tags,
+						   which would eat the ring and leave only the center
+						   text; health_donut() escapes every interpolation */
+						echo 'warmup' === $health['verdict']
 							? yac_ocache_health_donut( 0, $health_color, 'N/A', 'warming up' )
-							: yac_ocache_health_donut( $health['rate'], $health_color ) ); ?>
+							: yac_ocache_health_donut( $health['rate'], $health_color ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+						?>
 						<span class="yac-ocache-chip <?php echo esc_attr( $yac_ocache_chip[0] ); ?>"><?php echo esc_html( $yac_ocache_chip[1] ); ?></span>
 					</div>
 					<div class="yac-ocache-health-bars">
