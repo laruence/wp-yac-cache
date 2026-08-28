@@ -1,4 +1,4 @@
-# Yac Object Cache
+# Yac Object Cache For Wordpress
 
 [![CI](https://github.com/laruence/wordpress-yac-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/laruence/wordpress-yac-cache/actions/workflows/ci.yml)
 
