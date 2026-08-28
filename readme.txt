@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.2.1
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -99,10 +99,8 @@ Yac cannot delete entries by prefix, so a group flush clears the request-level c
 
 == Changelog ==
 
-= 1.2.1 =
-* Fixed the health-ring donut on the admin dashboard disappearing: the SVG was piped through `wp_kses_post()`, whose allowed-tag list strips SVG elements and left only the center text visible.
-
 = 1.2.0 =
+* Fixed the health-ring donut on the admin dashboard disappearing: the SVG was piped through `wp_kses_post()`, whose allowed-tag list strips SVG elements and left only the center text visible.
 * Renamed every plugin-owned symbol from the `wp_yac_`/`WP_YAC_`/`wp-yac-` prefixes to `yac_ocache_`/`YAC_OCACHE_`/`yac-ocache-` for WordPress.org prefix policy (the `wp_` prefix is reserved for WordPress core). The wp-config switches were renamed accordingly: `YAC_OCACHE_KEY_PREFIX`, `YAC_OCACHE_SKIP_EMPTY`, `YAC_OCACHE_DISABLE`, `YAC_OCACHE_WARMUP_LOOKUPS`.
 * The `wp_cache_*` functions and the `$wp_object_cache` global are the standard WordPress object cache API and keep their names.
 * WP-CLI: the commands stay `wp yac status` / `wp yac flush`; the command class is now `YAC_OCACHE_CLI_Command`.
