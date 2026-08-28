@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.2.0
+Stable tag: 1.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -98,6 +98,10 @@ Yes, with a caveat: blogs of one install share the cache namespace (keys carry n
 Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so WordPress core does not rely on it.
 
 == Changelog ==
+
+= 1.2.1 =
+* Placed the PHPCS EscapeOutput annotations around the health-ring output so WordPress.org Plugin Check recognizes the exemption (the previous inline annotation sat on the wrong line of the multi-line statement).
+* Annotated `pre_wp_cache_get` in the drop-in as a WordPress core hook.
 
 = 1.2.0 =
 * Fixed the health-ring donut on the admin dashboard disappearing: the SVG was piped through `wp_kses_post()`, whose allowed-tag list strips SVG elements and left only the center text visible.
