@@ -667,10 +667,12 @@ function yac_ocache_config_rows() {
 			'storage key prefix, 0-6 chars; the only isolation between installs sharing one PHP pool — use a different one per site; multisite blogs share it',
 		),
 		array(
-			"define( 'YAC_OCACHE_SKIP_EMPTY', false )",
-			defined( 'YAC_OCACHE_SKIP_EMPTY' ) && ! YAC_OCACHE_SKIP_EMPTY ? 'disabled' : 'enabled (default)',
+			"define( 'YAC_OCACHE_EMPTY_TTL', … )",
+			defined( 'YAC_OCACHE_EMPTY_TTL' )
+				? ( 0 === (int) YAC_OCACHE_EMPTY_TTL ? 'disabled' : number_format_i18n( (int) YAC_OCACHE_EMPTY_TTL ) . ' s' )
+				: '6 h (default)',
 			'wp-config.php',
-			'the single pollution filter: empty get_page_by_path negatives (bot 404 probes, never re-read) stay request-local',
+			'lifetime cap on empty-array negative cache results (bot-probed paths, comment query misses...); they stay shared but expire instead of living forever. Set 0 to disable',
 		),
 		array(
 			"define( 'YAC_OCACHE_DISABLE', true )",

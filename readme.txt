@@ -67,7 +67,7 @@ yac.values_memory_size = 64M    ; raise for large sites (big alloptions)
 **Optional wp-config switches**
 
 `
-define( 'YAC_OCACHE_SKIP_EMPTY', false ); // filter is on by default; set false to also store empty get_page_by_path negatives
+define( 'YAC_OCACHE_EMPTY_TTL', 0 );    // default 21600: lifetime cap (seconds) on empty-array negative cache results; set 0 to disable
 define( 'YAC_OCACHE_DISABLE', true );     // emergency escape hatch: force runtime-only mode
 `
 

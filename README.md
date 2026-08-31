@@ -24,9 +24,10 @@ Best fit is single-node (or few-node) WordPress installs.
   the group verbatim and hash (crc32b) only the key part, so dumps and the
   dashboard pie chart stay attributable by group. Configurable prefix via
   `YAC_OCACHE_KEY_PREFIX`
-- **Pollution guard** — `YAC_OCACHE_SKIP_EMPTY` (on by default, the single
-  filter) keeps empty `get_page_by_path:` negatives (bot 404 probes,
-  never re-read) request-local
+- **Empty-result lifetime cap** — empty-array negative cache results (bot
+  404 probes via `get_page_by_path`, comment query misses) are shared as
+  usual but expire after `YAC_OCACHE_EMPTY_TTL` (default 6 hours) instead
+  of living forever and squeezing hot keys out of the slot table
 - **False-safe** — a stored `false` is coerced to `0` before writing to
   shared memory (Yac's `get()` cannot tell a stored false from a miss);
   readers comparing by value see `0` instead of `false`
@@ -162,15 +163,14 @@ yac.values_memory_size = 64M   ; raise for large sites (alloptions!)
 define( 'YAC_OCACHE_DISABLE', true );    // force runtime-only mode
 define( 'YAC_OCACHE_KEY_PREFIX', 'wp' ); // key prefix, 0-6 chars; per-site isolation when sharing a PHP pool
 
-// The single pollution filter: bots probe unbounded one-off URLs and
-// each 404 path mints a get_page_by_path:<md5> key whose value is an
-// empty negative result — never re-read, yet each occupies a slot.
-// With the flag on, those empty values stay request-local. Stable
-// per-entity negative caches (comment children, term relationships,
-// adjacent posts...) ARE re-read on every view and keep being shared;
-// when their working set outgrows the slot table, the remedy is a
-// bigger yac.keys_memory_size (the dashboard says so), not skipping.
-define( 'YAC_OCACHE_SKIP_EMPTY', true );
+// Bots probe unbounded one-off URLs, and WordPress mints a cache entry
+// per query — get_page_by_path:<md5>, comment query hashes... — whose
+// value is often an empty negative result. Written without expiry, those
+// live forever and each one keeps occupying a slot until kicked.
+// YAC_OCACHE_EMPTY_TTL caps their lifetime: they stay shared (re-reads
+// still hit), expire after the TTL and free up on the next kick. Set 0
+// to disable the cap.
+define( 'YAC_OCACHE_EMPTY_TTL', 21600 ); // seconds; default 6 hours
 ```
 
 ## Benchmarks

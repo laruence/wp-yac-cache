@@ -272,8 +272,9 @@ if ( $yac_on ) {
 }
 
 // ---------------------------------------------------------------------------
-// YAC_OCACHE_SKIP_EMPTY: empty values of unbounded-URL-derived keys stay
-// request-local; stable per-entity negative caches keep being shared
+// YAC_OCACHE_EMPTY_TTL: empty arrays (negative cache results) are shared
+// with a lifetime cap instead of living forever; non-empty and explicit
+// short expiries are untouched
 // ---------------------------------------------------------------------------
 $long_key = 'overlong-' . str_repeat( 'x', 60 );
 $junk_key = 'get_page_by_path:' . md5( '/some/crawler/path' );
@@ -285,13 +286,41 @@ if ( $yac_on ) {
 	$GLOBALS['wp_object_cache'] = new Yac_Ocache_Object_Cache();
 	check( 'short-key empty array persists cross-request', wp_cache_get( 'short-empty' ) === array() );
 	check( 'over-long entity-key empty array persists cross-request', wp_cache_get( $long_key ) === array() );
-	check( 'junk-path empty does NOT persist cross-request', wp_cache_get( $junk_key ) === false );
+	check( 'junk-path empty persists cross-request', wp_cache_get( $junk_key ) === array() );
 
 	wp_cache_set( $junk_key, 'non-empty' );
 	$GLOBALS['wp_object_cache'] = new Yac_Ocache_Object_Cache();
 	check( 'junk-path non-empty value persists cross-request', wp_cache_get( $junk_key ) === 'non-empty' );
+
+	/* the lifetime cap shows up in the shared store's ttl field */
+	wp_cache_set( 'ttl-empty', array() );
+	wp_cache_set( 'ttl-full', array( 1 ) );
+	wp_cache_set( 'ttl-empty-str', '' );
+	wp_cache_set( 'ttl-short', array(), '', 120 );
+	$GLOBALS['wp_object_cache'] = new Yac_Ocache_Object_Cache();
+
+	$probe  = new Yac( 'wp:' );
+	$by_key = array();
+	$pages  = ( defined( 'YAC_VERSION' ) && version_compare( YAC_VERSION, '2.4.0', '>=' ) );
+	foreach ( (array) $probe->dump( $pages ? 1000 : -1 ) as $it ) {
+		if ( isset( $it['key'] ) ) {
+			$by_key[ $it['key'] ] = $it;
+		}
+	}
+	$now = time();
+	check( 'empty array written with the EMPTY_TTL cap',
+		isset( $by_key['wp:default:ttl-empty'] )
+		&& (int) $by_key['wp:default:ttl-empty']['ttl'] > $now
+		&& (int) $by_key['wp:default:ttl-empty']['ttl'] <= $now + YAC_OCACHE_EMPTY_TTL );
+	check( 'non-empty array keeps the original (no) expiry',
+		isset( $by_key['wp:default:ttl-full'] ) && 0 === (int) $by_key['wp:default:ttl-full']['ttl'] );
+	check( 'empty string keeps the original (no) expiry',
+		isset( $by_key['wp:default:ttl-empty-str'] ) && 0 === (int) $by_key['wp:default:ttl-empty-str']['ttl'] );
+	check( 'explicit shorter expiry wins over the cap',
+		isset( $by_key['wp:default:ttl-short'] )
+		&& (int) $by_key['wp:default:ttl-short']['ttl'] <= $now + 120 );
 } else {
-	echo "  skip skip-empty persistence assertions (Yac not active)\n";
+	echo "  skip empty-ttl persistence assertions (Yac not active)\n";
 }
 
 // ---------------------------------------------------------------------------

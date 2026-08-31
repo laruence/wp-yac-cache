@@ -10,14 +10,12 @@
  *   fit Yac's 48-byte limit (instance prefix included); over-long keys
  *   keep the group verbatim and hash (crc32b) only the key part, so
  *   dumps and the dashboard pie chart stay attributable by group.
- * - YAC_OCACHE_SKIP_EMPTY (default on, the single pollution filter): bots
- *   probe unbounded one-off URLs, and each 404 path mints a
- *   get_page_by_path:<md5> key whose value is an empty negative result
- *   never re-read, yet each occupies a slot — those empty values stay
- *   request-local. Stable per-entity negative caches (comment children,
- *   term relationships, adjacent posts...) are re-read on every view
- *   and keep being shared; when their working set outgrows the slot
- *   table, the remedy is a bigger yac.keys_memory_size, not skipping.
+ * - Empty array values are negative cache results — bot-probed one-off
+ *   URLs (get_page_by_path), comment query misses and alike. WordPress
+ *   writes them without expiry, so they live forever and each one keeps
+ *   occupying a slot until kicked. YAC_OCACHE_EMPTY_TTL (default 21600s)
+ *   caps their lifetime instead: they stay shared, expire after the TTL
+ *   (default 6 hours) and are re-queried on re-read. Set 0 to disable.
  * - Keys carry no per-blog prefix: single-node installs are the target
  *   and per-site isolation lives in YAC_OCACHE_KEY_PREFIX instead. Installs
  *   sharing one PHP pool must use different prefixes; multisite blogs
@@ -51,8 +49,12 @@ if ( ! defined( 'YAC_OCACHE_DROPIN_VERSION' ) ) {
 	define( 'YAC_OCACHE_DROPIN_VERSION', '1.2.1' );
 }
 
-if ( ! defined( 'YAC_OCACHE_SKIP_EMPTY' ) ) {
-	define( 'YAC_OCACHE_SKIP_EMPTY', true );
+if ( ! defined( 'YAC_OCACHE_EMPTY_TTL' ) ) {
+	/* lifetime cap for empty-array negative cache results (bot-probed
+	   paths, comment query misses...). WordPress writes them without
+	   expiry, so without a cap they live forever and keep occupying a
+	   slot until kicked. 0 disables the cap. */
+	define( 'YAC_OCACHE_EMPTY_TTL', 21600 );
 }
 
 function wp_cache_add( $key, $data, $group = '', $expire = 0 ) {
@@ -326,16 +328,7 @@ class Yac_Ocache_Object_Cache {
 			return false;
 		}
 
-		if ( $this->shm_write_skip( $id, $group, $data ) ) {
-			if ( isset( $this->cache[ $key ]['found'] ) && $this->cache[ $key ]['found'] ) {
-				return false;
-			}
-
-			$this->add_to_internal_cache( $key, $data, $group );
-			return true;
-		}
-
-		$ttl = $this->sanitize_ttl( $expire );
+		$ttl = $this->empty_value_ttl( $expire, $data );
 
 		/* Yac::add() can return false on CAS contention even for a free
 		   slot, so retry a couple of times */
@@ -648,12 +641,7 @@ class Yac_Ocache_Object_Cache {
 			return true;
 		}
 
-		if ( $this->shm_write_skip( $id, $group, $data ) ) {
-			$this->cache[ $key ]['found'] = true;
-			return true;
-		}
-
-		$ttl = $this->sanitize_ttl( $expire );
+		$ttl = $this->empty_value_ttl( $expire, $data );
 
 		/* store raw (no wrapper) so small scalars hit Yac's embedded
 		   path and live inside the slot itself, no value block; false
@@ -730,22 +718,18 @@ class Yac_Ocache_Object_Cache {
 		return array( $logical, strlen( $logical ) > $this->logical_key_budget, $group . ':' );
 	}
 
-	/* the single pollution filter: empty get_page_by_path negatives
-	   (bot 404 probes, never re-read) stay request-local; stable
-	   per-entity negative caches keep sharing — when those outgrow the
-	   table, raise keys_memory_size */
-	private function shm_write_skip( $id, $group, $data ) {
-		if ( ! YAC_OCACHE_SKIP_EMPTY ) {
-			return false;
+	/* empty array values are negative cache results (bot-probed
+	   get_page_by_path paths, comment query misses...): shared as usual,
+	   but their lifetime is capped by YAC_OCACHE_EMPTY_TTL so they expire
+	   and their slots free up instead of living forever until kicked */
+	private function empty_value_ttl( $expire, $data ) {
+		if ( 0 === YAC_OCACHE_EMPTY_TTL || ! is_array( $data ) || ! empty( $data ) ) {
+			return $this->sanitize_ttl( $expire );
 		}
 
-		if ( null !== $data && ! ( is_array( $data ) && empty( $data ) ) ) {
-			return false;
-		}
+		$ttl = $this->sanitize_ttl( $expire );
 
-		list( $logical ) = $this->logical_key( $id, $group );
-
-		return false !== strpos( $logical, 'get_page_by_path:' );
+		return $ttl > 0 ? min( $ttl, YAC_OCACHE_EMPTY_TTL ) : YAC_OCACHE_EMPTY_TTL;
 	}
 
 	private function sanitize_group( $group ) {
