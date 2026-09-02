@@ -32,7 +32,7 @@ ck( 'old constant WP_YAC_VERSION gone', ! defined( 'WP_YAC_VERSION' ) );
 global $wp_object_cache;
 ck( '$wp_object_cache is Yac_Ocache_Object_Cache', $wp_object_cache instanceof Yac_Ocache_Object_Cache );
 ck( 'yac backend active (shared memory)', ! empty( $wp_object_cache->yac_available ) );
-ck( 'drop-in version is 1.2.0', defined( 'YAC_OCACHE_DROPIN_VERSION' ) && YAC_OCACHE_DROPIN_VERSION === YAC_OCACHE_VERSION );
+ck( 'drop-in version matches the plugin', defined( 'YAC_OCACHE_DROPIN_VERSION' ) && YAC_OCACHE_DROPIN_VERSION === YAC_OCACHE_VERSION );
 ck( 'wp_cache_set/get round trip', wp_cache_set( 'yac_ocache_test', 'hello-42', 'default' ) && wp_cache_get( 'yac_ocache_test', 'default' ) === 'hello-42' );
 ck( 'value visible from a fresh instance (cross-request)', ( function () {
 	$fresh = new Yac_Ocache_Object_Cache();
@@ -68,8 +68,26 @@ if ( class_exists( 'WP' ) ) {
 	ob_start();
 	$wp->main( '' );
 	$html = ob_get_clean();
-	ck( 'front page renders', strlen( $html ) > 500 );
+	/* a complete document means the theme template ran to the end;
+	   a raw byte-length check is fragile against WP's own output */
+	$rendered = false !== strpos( $html, '</html>' );
+	ck( 'front page renders to a complete document', $rendered );
 	ck( 'no PHP fatal/warning/notice in output', ! preg_match( '/(Fatal error|Parse error|Warning:|Notice:)/i', $html ) );
+	if ( ! $rendered ) {
+		echo "--- front page diagnostics ---\n";
+		echo 'output length: ' . strlen( $html ) . "\n";
+		echo substr( $html, 0, 500 ) . "\n";
+		$wplog = defined( 'WP_DEBUG_LOG' ) ? WP_DEBUG_LOG : false;
+		if ( is_string( $wplog ) && file_exists( $wplog ) ) {
+			echo "--- WP_DEBUG_LOG tail (non-deprecated, last 20) ---\n";
+			$lines = array_filter( file( $wplog, FILE_IGNORE_NEW_LINES ), function ( $l ) {
+				return false === strpos( $l, 'Deprecated' );
+			} );
+			foreach ( array_slice( $lines, -20 ) as $line ) {
+				echo $line . "\n";
+			}
+		}
+	}
 }
 
 $failures = 0;
