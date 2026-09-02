@@ -54,7 +54,12 @@ $st = yac_ocache_self_test();
 ck( 'self test round trip', is_array( $st ) && ! empty( $st['ok'] ) );
 ck( 'storage info available', is_array( yac_ocache_storage_info() ) );
 
-/* a real front page renders with WP_DEBUG on */
+/* a real front page renders with WP_DEBUG on. Mimic wp-blog-header.php:
+   wp-load.php already ran above, so dispatch the main query and then hand
+   off to the template loader — that is what renders the page. */
+if ( ! defined( 'WP_USE_THEMES' ) ) {
+	define( 'WP_USE_THEMES', true );
+}
 $host = parse_url( get_option( 'siteurl' ), PHP_URL_HOST ) ?: 'localhost';
 $_SERVER += array(
 	'HTTP_HOST'       => $host,
@@ -66,7 +71,8 @@ $_SERVER += array(
 if ( class_exists( 'WP' ) ) {
 	$wp = new WP();
 	ob_start();
-	$wp->main( '' );
+	$wp->main();
+	require ABSPATH . WPINC . '/template-loader.php';
 	$html = ob_get_clean();
 	/* a complete document means the theme template ran to the end;
 	   a raw byte-length check is fragile against WP's own output */

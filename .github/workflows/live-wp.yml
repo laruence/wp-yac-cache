@@ -10,6 +10,12 @@ on:
     branches: [master]
   pull_request:
 
+# a newer push cancels the still-running/queued CI of the same branch,
+# so force-pushes don't stack redundant runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   live-wp:
     runs-on: ubuntu-latest

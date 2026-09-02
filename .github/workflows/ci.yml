@@ -5,6 +5,12 @@ on:
     branches: [master]
   pull_request:
 
+# a newer push cancels the still-running/queued CI of the same branch,
+# so force-pushes don't stack redundant runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   phpcs:
     # mirrors the sniffs WordPress.org Plugin Check runs (EscapeOutput,
@@ -17,6 +23,15 @@ jobs:
         with:
           php-version: '8.5'
           coverage: none
+
+      - name: Cache composer tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.composer/cache
+            ~/.composer/vendor
+            ~/.composer/composer.json
+          key: ${{ runner.os }}-wpcs-v1
 
       - name: "PHPCS (WPCS: EscapeOutput + PrefixAllGlobals)"
         run: |
