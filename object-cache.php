@@ -636,11 +636,6 @@ class Yac_Ocache_Object_Cache {
 			return true;
 		}
 
-		if ( isset( $this->written[ $key ] ) ) {
-			$this->cache[ $key ]['found'] = true;
-			return true;
-		}
-
 		$ttl = $this->empty_value_ttl( $expire, $data );
 
 		/* store raw (no wrapper) so small scalars hit Yac's embedded

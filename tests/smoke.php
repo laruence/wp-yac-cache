@@ -195,6 +195,15 @@ if ( $yac_on ) {
 	$GLOBALS['wp_object_cache'] = new Yac_Ocache_Object_Cache();
 	check( 'value persists into a new instance (cross-request)', wp_cache_get( 'persist' ) === 'across-requests' );
 
+	// Regression: within one request, add() then set() on the same key
+	// must actually re-write shared memory. An old early-return in set()
+	// short-circuited when the key was already marked written by add(),
+	// leaving the stale add() value behind for the next request.
+	wp_cache_add( 'readd', 'first' );
+	wp_cache_set( 'readd', 'second' );
+	$GLOBALS['wp_object_cache'] = new Yac_Ocache_Object_Cache();
+	check( 'set after add overwrites shared value', wp_cache_get( 'readd' ) === 'second' );
+
 	// And flush wipes shared memory, so a new instance after flush misses.
 	wp_cache_set( 'persist2', 'x' );
 	wp_cache_flush();
