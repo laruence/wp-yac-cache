@@ -1,0 +1,72 @@
+name: Live WordPress
+
+# Real end-to-end test: boot a real WordPress against MySQL with the yac
+# extension, let plugin activation deploy the drop-in, then run
+# tests/live-wp-debug.php from the WP root. The smoke test mocks the WP
+# functions; this one exercises the real boot + drop-in load path.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  live-wp:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: yac, mysqli
+          tools: wp-cli
+          coverage: none
+
+      - name: Install WordPress
+        run: |
+          wp core download --path=/tmp/wp --version=latest
+          cd /tmp/wp
+          wp config create \
+            --dbname=wordpress --dbuser=root --dbpass=root --dbhost=127.0.0.1 \
+            --extra-php <<'EOF'
+          define( 'WP_DEBUG', true );
+          define( 'WP_DEBUG_LOG', '/tmp/wp-debug.log' );
+          EOF
+          wp core install \
+            --url=http://localhost --title="Live Test" \
+            --admin_user=admin --admin_password=admin \
+            --admin_email=admin@example.com --skip-email
+
+      - name: Install and activate the plugin
+        run: |
+          # the release zip has no top-level directory
+          bash scripts/build-release.sh /tmp/yac-obj-cache.zip
+          mkdir -p /tmp/wp/wp-content/plugins/yac-ocache
+          unzip -o /tmp/yac-obj-cache.zip -d /tmp/wp/wp-content/plugins/yac-ocache
+          cd /tmp/wp
+          # activation deploys the object-cache.php drop-in
+          wp plugin activate yac-ocache
+          test -f /tmp/wp/wp-content/object-cache.php
+
+      - name: Run the live debug test
+        run: |
+          cd /tmp/wp
+          php -d yac.enable_cli=1 -d display_errors=0 \
+              -d log_errors=1 -d error_log=/tmp/wp-yac-test.log \
+              "$GITHUB_WORKSPACE/tests/live-wp-debug.php"

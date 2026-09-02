@@ -2,8 +2,8 @@
 /**
  * Real-WordPress debug test for the renamed Yac Object Cache plugin.
  * Requires: wp-config.php with WP_DEBUG=true, plugin ACTIVE, drop-in deployed.
- * Run from the WP root:
- *   php -d yac.enable_cli=1 -d display_errors=0 -d log_errors=1 -d error_log=/tmp/wp-yac-test.log /tmp/wp-test-yac-ocache.php
+ * Run from the WP root (the script boots WP via getcwd()/wp-load.php):
+ *   php -d yac.enable_cli=1 -d display_errors=0 -d log_errors=1 -d error_log=/tmp/wp-yac-test.log tests/live-wp-debug.php
  */
 error_reporting( E_ALL & ~E_DEPRECATED );
 ini_set( 'display_errors', 0 );
