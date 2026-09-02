@@ -18,6 +18,7 @@ Unlike Memcached or Redis, Yac stores data in **shared memory inherited by every
 
 **Highlights**
 
+* **Fast.** A cache read is a shared-memory hash lookup — the status page measures a 0.005 ms round trip. On a production site (laruence.com, PHP 8.1-FPM, 8 cores), full homepage renders ran ~20% faster than the classic Memcached drop-in: 141.6 vs 118.7 req/s at 20 concurrent users, +18-20% across 20-100 concurrency, zero failed requests.
 * **No external server.** The cache lives in shared memory (`mmap`/SysV), fork-inherited by FPM workers.
 * **Lock-free.** Per-slot CAS arbitration; throughput scales with worker count. No global lock.
 * **Self-deploying.** Activating the plugin writes `object-cache.php` to `wp-content/`.
@@ -29,6 +30,12 @@ Unlike Memcached or Redis, Yac stores data in **shared memory inherited by every
 **Best fit**
 
 Yac is a *local* cache. It is ideal for single-node or few-node WordPress installs where all PHP workers run on one machine. On large multi-server clusters with strict cross-node consistency needs, a network cache (Memcached/Redis) may suit better.
+
+== Screenshots ==
+
+1. Cache health dashboard: hit-rate ring, cause-attributed metric bars and the live shared-memory round trip (0.005 ms).
+2. Storage overview: key slots in use, lookups, hit rate, values-memory pool and the memory-health verdict.
+3. Entry inspector: keys-by-group pie, occupancy totals and the largest entries by content length.
 
 == Installation ==
 
