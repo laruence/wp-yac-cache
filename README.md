@@ -1,6 +1,7 @@
 # Yac Object Cache For Wordpress
 
 [![CI](https://github.com/laruence/wp-yac-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/laruence/wp-yac-cache/actions/workflows/ci.yml)
+[![Live WordPress](https://github.com/laruence/wp-yac-cache/actions/workflows/live-wp.yml/badge.svg)](https://github.com/laruence/wp-yac-cache/actions/workflows/live-wp.yml)
 
 A [Yac](https://github.com/laruence/yac) backed object cache for WordPress.
 
