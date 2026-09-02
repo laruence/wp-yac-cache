@@ -1,0 +1,93 @@
+<?php
+/**
+ * Real-WordPress debug test for the renamed Yac Object Cache plugin.
+ * Requires: wp-config.php with WP_DEBUG=true, plugin ACTIVE, drop-in deployed.
+ * Run from the WP root:
+ *   php -d yac.enable_cli=1 -d display_errors=0 -d log_errors=1 -d error_log=/tmp/wp-yac-test.log /tmp/wp-test-yac-ocache.php
+ */
+error_reporting( E_ALL & ~E_DEPRECATED );
+ini_set( 'display_errors', 0 );
+
+$checks = array();
+function ck( $label, $cond ) {
+	global $checks;
+	$checks[] = (bool) $cond;
+	echo ( $cond ? '  ok   ' : '  FAIL ' ) . $label . "\n";
+}
+
+require getcwd() . '/wp-load.php';
+
+ck( 'WordPress booted under WP_DEBUG', function_exists( 'add_action' ) && defined( 'WP_DEBUG' ) && WP_DEBUG );
+
+/* plugin active: yac-ocache.php loaded as part of the plugin list */
+$active = (array) get_option( 'active_plugins', array() );
+ck( 'plugin is in active_plugins', in_array( 'yac-ocache/yac-ocache.php', $active, true ) );
+ck( 'new function yac_ocache_status() exists', function_exists( 'yac_ocache_status' ) );
+ck( 'new class Yac_Ocache_Object_Cache exists', class_exists( 'Yac_Ocache_Object_Cache' ) );
+ck( 'new constant YAC_OCACHE_VERSION defined', defined( 'YAC_OCACHE_VERSION' ) );
+ck( 'old name wp_yac_status() gone', ! function_exists( 'wp_yac_status' ) );
+ck( 'old constant WP_YAC_VERSION gone', ! defined( 'WP_YAC_VERSION' ) );
+
+/* the activated drop-in (renamed, 1.2.0) serves WordPress */
+global $wp_object_cache;
+ck( '$wp_object_cache is Yac_Ocache_Object_Cache', $wp_object_cache instanceof Yac_Ocache_Object_Cache );
+ck( 'yac backend active (shared memory)', ! empty( $wp_object_cache->yac_available ) );
+ck( 'drop-in version is 1.2.0', defined( 'YAC_OCACHE_DROPIN_VERSION' ) && YAC_OCACHE_DROPIN_VERSION === YAC_OCACHE_VERSION );
+ck( 'wp_cache_set/get round trip', wp_cache_set( 'yac_ocache_test', 'hello-42', 'default' ) && wp_cache_get( 'yac_ocache_test', 'default' ) === 'hello-42' );
+ck( 'value visible from a fresh instance (cross-request)', ( function () {
+	$fresh = new Yac_Ocache_Object_Cache();
+	return $fresh->get( 'yac_ocache_test', 'default' ) === 'hello-42';
+} )() );
+ck( 'delete works', wp_cache_delete( 'yac_ocache_test', 'default' ) && wp_cache_get( 'yac_ocache_test', 'default' ) === false );
+
+/* status / health plumbing */
+$states = array();
+foreach ( yac_ocache_status() as $row ) {
+	$states[ $row[0] ] = $row[1];
+}
+ck( 'status: dropin ok', isset( $states['dropin'] ) && 'ok' === $states['dropin'] );
+ck( 'status: dropin_version ok', ! isset( $states['dropin_version'] ) || 'ok' === $states['dropin_version'] );
+ck( 'status: wp_cache ok', isset( $states['wp_cache'] ) && 'ok' === $states['wp_cache'] );
+ck( 'status: extension ok', isset( $states['extension'] ) && 'ok' === $states['extension'] );
+ck( 'plugin reports operational', yac_ocache_is_operational() );
+$st = yac_ocache_self_test();
+ck( 'self test round trip', is_array( $st ) && ! empty( $st['ok'] ) );
+ck( 'storage info available', is_array( yac_ocache_storage_info() ) );
+
+/* a real front page renders with WP_DEBUG on */
+$host = parse_url( get_option( 'siteurl' ), PHP_URL_HOST ) ?: 'localhost';
+$_SERVER += array(
+	'HTTP_HOST'       => $host,
+	'REQUEST_URI'     => '/',
+	'REQUEST_METHOD'  => 'GET',
+	'SERVER_PROTOCOL' => 'HTTP/1.1',
+	'QUERY_STRING'    => '',
+);
+if ( class_exists( 'WP' ) ) {
+	$wp = new WP();
+	ob_start();
+	$wp->main( '' );
+	$html = ob_get_clean();
+	ck( 'front page renders', strlen( $html ) > 500 );
+	ck( 'no PHP fatal/warning/notice in output', ! preg_match( '/(Fatal error|Parse error|Warning:|Notice:)/i', $html ) );
+}
+
+$failures = 0;
+foreach ( $checks as $ok ) {
+	if ( ! $ok ) {
+		$failures++;
+	}
+}
+echo "\npassed: " . ( count( $checks ) - $failures ) . ", failed: $failures\n";
+
+$log = ini_get( 'error_log' );
+if ( $log && file_exists( $log ) ) {
+	$lines = array_filter( file( $log, FILE_IGNORE_NEW_LINES ), function ( $l ) {
+		return false === strpos( $l, 'Deprecated' );
+	} );
+	echo "--- error_log tail (non-deprecated, last 20) ---\n";
+	foreach ( array_slice( $lines, -20 ) as $line ) {
+		echo $line . "\n";
+	}
+}
+exit( $failures > 0 ? 1 : 0 );
