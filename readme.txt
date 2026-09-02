@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.2.1
+Stable tag: 1.2.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -98,6 +98,11 @@ Yes, with a caveat: blogs of one install share the cache namespace (keys carry n
 Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so WordPress core does not rely on it.
 
 == Changelog ==
+
+= 1.2.2 =
+* Fixed stale shared-memory writes: within one request, `wp_cache_set()` on a key already written by `wp_cache_add()` in that same request skipped the shared-memory write, so other requests kept reading the value the add stored (the `update_option()` pattern — `add()` inside `get_option()`, then `set()` — left the old option behind).
+* Replaced `YAC_OCACHE_SKIP_EMPTY` with `YAC_OCACHE_EMPTY_TTL` (default 21600s): empty results (bot-probed `get_page_by_path()` paths, comment query misses) now share as usual but expire after that lifetime instead of occupying a slot forever. Set 0 to disable the cap.
+* The health panel's "keys used" now reports the number of live entries rather than the `slots_used` high-water mark.
 
 = 1.2.1 =
 * Placed the PHPCS EscapeOutput annotations around the health-ring output so WordPress.org Plugin Check recognizes the exemption (the previous inline annotation sat on the wrong line of the multi-line statement).
