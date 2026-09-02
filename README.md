@@ -107,19 +107,26 @@ extension=yac.so
 
 ## Installation
 
-### Via WP-CLI
+### From the WordPress plugin directory (recommended)
+
+Plugins → Add New → search for "Yac Object Cache", or via WP-CLI:
+
+```bash
+wp plugin install yac-object-cache --activate
+```
+
+Directory page: [Yac Object Cache in the WordPress plugin directory](https://wordpress.org/plugins/yac-object-cache/)
+
+### From GitHub releases
+
+Via WP-CLI:
 
 ```bash
 wp plugin install https://github.com/laruence/wp-yac-cache/releases/latest/download/yac-obj-cache.zip --activate
 ```
 
-### Via the WordPress admin
-
-Download `yac-obj-cache.zip` from the [releases page](https://github.com/laruence/wp-yac-cache/releases),
+Or download `yac-obj-cache.zip` from the [releases page](https://github.com/laruence/wp-yac-cache/releases),
 then Plugins → Add New → Upload Plugin.
-
-(The plugin has been submitted to the WordPress.org directory and will be
-installable from the plugin repository once it passes review.)
 
 ### Configuration
 
