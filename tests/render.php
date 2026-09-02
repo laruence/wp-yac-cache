@@ -278,6 +278,7 @@ $GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'miss'       => 9000,
 	'kicks'      => 4000,
 ) );
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 26214, 'own' => 26214 ) );
 
 $html = render_page();
 
@@ -295,6 +296,27 @@ $GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 20000,
 $html = render_page();
 
 check( 'shared-pool advice shown', strpos( $html, 'shared-pool occupancy' ) !== false );
+
+// --- Scenario 7b: slots_used high-water vs live entries ------------------------
+// slots_used counts every slot populated since the last flush, expired entries
+// included; the Keys bar and the verdict must follow the live-entry count
+
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
+	'slots_used' => 31000,
+	'hits'       => 95000,
+	'miss'       => 5000,
+) );
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 12000, 'own' => 12000 ) );
+
+$html = render_page();
+
+check( 'Keys bar shows live entries, not the slots_used high-water', strpos( $html, '12,000 <small>/ 32,768</small>' ) !== false );
+check( 'verdict ignores the slots_used high-water', strpos( $html, 'Healthy' ) !== false && strpos( $html, 'Key slots full' ) === false );
+
+ob_start();
+yac_ocache_render_dashboard_widget();
+$widget_diverged = ob_get_clean();
+check( 'widget shows live entries too', strpos( $widget_diverged, '12,000 / 32,768' ) !== false );
 
 // --- Scenario 8: drop-in version check -----------------------------------------
 

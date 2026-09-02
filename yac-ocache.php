@@ -485,8 +485,15 @@ function yac_ocache_format_bytes( $bytes ) {
    every bar is green */
 function yac_ocache_health( $info, $snapshot ) {
 	$keys_total = (int) $info['slots_size'];
-	$keys_used  = (int) $info['slots_used'];
-	$keys_pct   = $keys_total > 0 ? $keys_used / $keys_total * 100 : 0;
+
+	/* Yac's slots_used is a high-water mark: every slot populated since
+	   the last flush, including entries whose TTL elapsed and await
+	   overwrite. The write path reuses such slots for free before it
+	   kicks live data, so they are not key pressure — the dump-based
+	   snapshot's live-entry count is. Without a snapshot (backend down)
+	   fall back to slots_used */
+	$keys_used = $snapshot ? (int) $snapshot['entries'] : (int) $info['slots_used'];
+	$keys_pct  = $keys_total > 0 ? $keys_used / $keys_total * 100 : 0;
 
 	$values_total = (int) $info['values_memory_size'];
 	$occupied     = $snapshot ? (float) $snapshot['occupied'] : 0;
@@ -502,6 +509,7 @@ function yac_ocache_health( $info, $snapshot ) {
 			'verdict'     => 'warmup',
 			'rate'        => null,
 			'lookups'     => $lookups,
+			'keys_used'   => $keys_used,
 			'keys_pct'    => $keys_pct,
 			'vals_pct'    => $vals_pct,
 			'kick_obs'    => 0,
@@ -528,10 +536,11 @@ function yac_ocache_health( $info, $snapshot ) {
 	$kicks  = (int) $info['kicks'];
 	$misses = (int) $info['miss'];
 
-	/* every successful insert either took a free slot (slots_used) or
-	   kicked one, so inserts ~= slots_used + kicks; the observed kick
-	   share vs the uniform-hashing expectation A^4/5 exposes a bad
-	   placement; kicks/misses attributes misses to evictions */
+	/* inserts ~= keys_used + kicks: an insert either occupies a slot or
+	   kicks a live entry (reused expired slots aside — they leave no
+	   counter); the observed kick share vs the uniform-hashing expectation
+	   A^4/5 exposes a bad placement, kicks/misses attributes misses to
+	   evictions */
 	$inserts     = $keys_used + $kicks;
 	$kick_obs    = $inserts > 0 ? $kicks / $inserts * 100 : 0;
 	$kick_exp    = pow( min( 1, $keys_pct / 100 ), 4 ) / 5 * 100;
@@ -584,6 +593,7 @@ function yac_ocache_health( $info, $snapshot ) {
 		'verdict'     => $verdict,
 		'rate'        => $rate,
 		'lookups'     => $lookups,
+		'keys_used'   => $keys_used,
 		'keys_pct'    => $keys_pct,
 		'vals_pct'    => $vals_pct,
 		'kick_obs'    => $kick_obs,
@@ -756,7 +766,7 @@ function yac_ocache_render_dashboard_widget() {
 	$circ       = 2 * M_PI * $r;
 
 	$keys_total   = (int) $info['slots_size'];
-	$keys_used    = (int) $info['slots_used'];
+	$keys_used    = (int) $health['keys_used'];
 	$values_total = (int) $info['values_memory_size'];
 	?>
 	<div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
@@ -1083,7 +1093,7 @@ function yac_ocache_render_admin_page() {
 			$health_colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638', 'warmup' => '#8c8f94' );
 			$health_color  = $health_colors[ $health['verdict'] ];
 
-			$keys_used    = (int) $info['slots_used'];
+			$keys_used    = (int) $health['keys_used'];
 			$keys_total   = (int) $info['slots_size'];
 			$values_total = (int) $info['values_memory_size'];
 			$occupied     = $snapshot ? (float) $snapshot['occupied'] : 0;
