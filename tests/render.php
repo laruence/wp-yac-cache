@@ -88,6 +88,7 @@ function fake_info( $over = array() ) {
 
 		'slots_size'          => 32768,
 		'slots_used'          => 0,
+		'start_time'          => time() - ( 3 * 86400 + 4 * 3600 + 120 ), /* 3 d 4 h 2 m */
 	), $over );
 }
 
@@ -123,6 +124,12 @@ function render_page() {
 	yac_ocache_render_admin_page();
 	return ob_get_clean();
 }
+
+// --- Uptime formatting --------------------------------------------------------
+
+check( 'uptime keeps the two largest units', '3 d 4 h' === yac_ocache_format_uptime( 3 * 86400 + 4 * 3600 + 120 ) );
+check( 'uptime skips zero units', '42 m 7 s' === yac_ocache_format_uptime( 42 * 60 + 7 ) );
+check( 'uptime floors to the second', '0 s' === yac_ocache_format_uptime( 0 ) );
 
 // --- Scenario 1: green — slots and values far from full -----------------------
 
@@ -347,7 +354,16 @@ $GLOBALS['yac_ocache_test_status'] = array(
 $html = render_page();
 check( 'healthy status collapses to active bar', strpos( $html, 'Active' ) !== false );
 check( 'healthy status shows no problem rows', strpos( $html, 'FAIL' ) === false && strpos( $html, '>WARN<' ) === false );
+check( 'active bar keeps the short form', strpos( $html, 'running on Yac SHM' ) !== false );
+check( 'active bar shows SHM uptime', strpos( $html, 'for 3 d 4 h' ) !== false );
 check( 'round trip folded into Active bar', ! yac_ocache_backend_usable() || strpos( $html, 'round trip' ) !== false );
+
+// --- Scenario 9b: old Yac builds without start_time degrade gracefully -------
+
+unset( $GLOBALS['yac_ocache_test_storage_info']['start_time'] );
+
+$html = render_page();
+check( 'no uptime on Yac builds without start_time', strpos( $html, 'for 3 d 4 h' ) === false && strpos( $html, 'Active' ) !== false );
 
 // --- Dashboard widget -------------------------------------------------------
 

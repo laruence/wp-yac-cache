@@ -480,6 +480,30 @@ function yac_ocache_format_bytes( $bytes ) {
 	return round( $bytes, $i ? 2 : 0 ) . ' ' . $units[ $i ];
 }
 
+/* compact uptime like '3 d 4 h' / '42 m 7 s' — the two largest non-zero
+   units carry all the information worth showing */
+function yac_ocache_format_uptime( $seconds ) {
+	$seconds = max( 0, (int) $seconds );
+	$parts   = array(
+		'd' => (int) floor( $seconds / 86400 ),
+		'h' => (int) floor( $seconds / 3600 ) % 24,
+		'm' => (int) floor( $seconds / 60 ) % 60,
+		's' => $seconds % 60,
+	);
+
+	$out = array();
+	foreach ( $parts as $unit => $value ) {
+		if ( $value > 0 || ( empty( $out ) && 's' === $unit ) ) {
+			$out[] = $value . ' ' . $unit;
+		}
+		if ( count( $out ) >= 2 ) {
+			break;
+		}
+	}
+
+	return implode( ' ', $out );
+}
+
 /* health verdict from keys/values fullness + hit rate. 'causes' names
    the bars that take the verdict color instead of green; when healthy
    every bar is green */
@@ -1059,7 +1083,10 @@ function yac_ocache_render_admin_page() {
 			<p style="display: inline-flex; align-items: center; gap: 8px; background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 4px 0 0;">
 				<span>✓</span><strong><?php echo esc_html( 'Active' ); ?></strong>
 				<span>
-					<?php echo esc_html( '— the object cache is running on Yac shared memory' ); ?>
+					<?php echo esc_html( '— running on Yac SHM' ); ?>
+					<?php if ( isset( $info['start_time'] ) ) : ?>
+						<span title="<?php echo esc_attr( 'shared memory uptime' ); ?>"> &middot; <?php echo esc_html( 'for ' . yac_ocache_format_uptime( time() - (int) $info['start_time'] ) ); ?></span>
+					<?php endif; ?>
 					<?php if ( null !== $self_test && $self_test['ok'] ) : ?>
 						<span title="<?php echo esc_attr( 'set/get/delete round trip' ); ?>"> &middot; <?php echo esc_html( 'round trip ' . number_format_i18n( $self_test['elapsed'], 3 ) . ' ms' ); ?></span>
 					<?php endif; ?>
