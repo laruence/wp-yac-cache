@@ -6,7 +6,7 @@
  * Version: 1.2.2
  * Requires at least: 5.6
  * Requires PHP: 7.0
- * Author: Xinchen Hui<laruence@php.net>
+ * Author: Laruence <laruence@php.net>
  * Author URI: https://www.laruence.com
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
