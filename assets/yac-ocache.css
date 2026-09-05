@@ -81,12 +81,13 @@
 	.yac-ocache-bars .val small { font-weight: 400; color: #646970; }
 	.yac-ocache-windows { margin-top: 14px; border-top: 1px solid #f0f0f1; padding-top: 10px; }
 	.yac-ocache-windows-title { margin: 0 0 8px; font-size: 13px; }
-	.yac-ocache-windows-body { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
-	.yac-ocache-sparkline { flex: none; display: block; background: #f6f7f7; border: 1px solid #f0f0f1; border-radius: 6px; }
-	.yac-ocache-window-stats { list-style: none; margin: 0; padding: 0; }
-	.yac-ocache-window-stats li { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; padding: 4px 0; }
+	.yac-ocache-windows-body { display: flex; flex-direction: column; gap: 12px; }
+	.yac-ocache-chart { width: 100%; height: auto; display: block; background: #f6f7f7; border: 1px solid #f0f0f1; border-radius: 6px; }
+	.yac-ocache-window-stats { list-style: none; margin: 0; padding: 0; display: flex; gap: 24px; flex-wrap: wrap; }
+	.yac-ocache-window-stats li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 2px 0; flex: 0 1 150px; }
 	.yac-ocache-window-stats span { color: #50575e; }
 	.yac-ocache-window-stats strong { font-weight: 600; color: #1d2327; }
+	a.yac-ocache-tab { text-decoration: none; }
 	.yac-ocache-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 600; margin-top: 12px; }
 	.yac-ocache-chip-good { background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; }
 	.yac-ocache-chip-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
