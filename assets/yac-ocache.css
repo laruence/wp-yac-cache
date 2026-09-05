@@ -65,23 +65,9 @@
 	.yac-ocache-entry-list.is-hidden { display: none; }
 	.yac-ocache-entry-bars .yac-ocache-entry-caption { color: #646970; font-size: 12px; padding-bottom: 2px; }
 	.yac-ocache-note { color: #646970; font-size: 12px; margin-top: 8px; }
-	.yac-ocache-health { display: flex; gap: 28px; flex-wrap: wrap; align-items: center; }
-	.yac-ocache-health-ring { flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; }
-	.yac-ocache-health-donut { width: 200px; height: 200px; display: block; }
-	.yac-ocache-health-donut .yac-ocache-donut-track, .yac-ocache-health-donut .yac-ocache-donut-fill { stroke-width: 18; }
-	.yac-ocache-health-donut .yac-ocache-donut-pct { font-size: 34px; }
-	.yac-ocache-health-donut .yac-ocache-donut-sub { font-size: 13px; }
-	.yac-ocache-health-bars { flex: 1 1 420px; }
-	.yac-ocache-bars { list-style: none; margin: 0; padding: 0; }
-	.yac-ocache-bars li { display: grid; grid-template-columns: 86px 1fr 150px; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; }
-	.yac-ocache-bars .lbl { color: #50575e; }
-	.yac-ocache-bars .track { background: #f0f0f1; border-radius: 6px; height: 13px; overflow: hidden; }
-	.yac-ocache-bars .fill { display: block; height: 100%; border-radius: 6px; }
-	.yac-ocache-bars .val { text-align: right; font-weight: 600; color: #1d2327; }
-	.yac-ocache-bars .val small { font-weight: 400; color: #646970; }
-	.yac-ocache-windows { margin-top: 14px; border-top: 1px solid #f0f0f1; padding-top: 10px; }
-	.yac-ocache-windows-title { margin: 0 0 8px; font-size: 13px; }
-	.yac-ocache-windows-body { display: flex; flex-direction: column; gap: 12px; }
+	.yac-ocache-health-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+	.yac-ocache-health-top .yac-ocache-tabs { margin: 0; border-bottom: 0; }
+	.yac-ocache-windows { display: flex; flex-direction: column; gap: 12px; }
 	.yac-ocache-chart { width: 100%; height: auto; display: block; background: #f6f7f7; border: 1px solid #f0f0f1; border-radius: 6px; }
 	.yac-ocache-window-stats { list-style: none; margin: 0; padding: 0; display: flex; gap: 24px; flex-wrap: wrap; }
 	.yac-ocache-window-stats li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 2px 0; flex: 0 1 150px; }
