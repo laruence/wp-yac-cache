@@ -67,9 +67,10 @@
 	.yac-ocache-note { color: #646970; font-size: 12px; margin-top: 8px; }
 	.yac-ocache-health-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 	.yac-ocache-windows { display: flex; flex-direction: column; gap: 12px; }
-	/* segmented range control, top-left of the panel; Roboto to match the
-	   chart face, pill group with a single sliding highlight */
-	.yac-ocache-range { display: inline-flex; padding: 2px; gap: 2px; background: #f0f0f1; border-radius: 8px; }
+	/* segmented range control below the chart; Roboto to match the chart
+	   face, pill group with a single highlight. align-self keeps it its own
+	   width inside the column-flex windows stack instead of stretching */
+	.yac-ocache-range { display: inline-flex; align-self: flex-start; padding: 2px; gap: 2px; background: #f0f0f1; border-radius: 8px; }
 	.yac-ocache-range-btn { border: 0; background: none; border-radius: 6px; padding: 5px 14px; font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 500; letter-spacing: .2px; color: #646970; cursor: pointer; transition: background .12s, color .12s, box-shadow .12s; }
 	.yac-ocache-range-btn:hover { color: #1d2327; }
 	.yac-ocache-range-btn:focus-visible { outline: 2px solid #2271b1; outline-offset: 1px; }
@@ -85,7 +86,7 @@
 	.yac-ocache-metric-label { position: relative; font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 11px; font-weight: 400; letter-spacing: .2px; }
 	.yac-ocache-metric[data-yac-series] .yac-ocache-metric-label { padding-left: 15px; }
 	.yac-ocache-metric[data-yac-series] .yac-ocache-metric-label::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 11px; height: 2px; border-radius: 1px; background: currentColor; }
-	.yac-ocache-metric-val { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+	.yac-ocache-metric-val { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
 	.yac-ocache-metric[data-yac-series="rate"] { color: #059669; }
 	.yac-ocache-metric[data-yac-series="hits"] { color: #2563eb; }
 	.yac-ocache-metric[data-yac-series="miss"] { color: #7c3aed; }

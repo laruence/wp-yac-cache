@@ -1414,11 +1414,6 @@ function yac_ocache_render_admin_page() {
 				$yac_ocache_start_time = ! empty( $yac_ocache_samples ) ? (int) $yac_ocache_samples[0]['start_time'] : 0;
 				?>
 				<div class="yac-ocache-health-top">
-					<div class="yac-ocache-range" role="group" aria-label="<?php echo esc_attr( 'Trend range' ); ?>">
-						<button type="button" class="yac-ocache-range-btn is-active" data-yac-range="today" aria-pressed="true"><?php echo esc_html( 'Today' ); ?></button>
-						<button type="button" class="yac-ocache-range-btn" data-yac-range="yday" aria-pressed="false"><?php echo esc_html( 'Yesterday' ); ?></button>
-						<button type="button" class="yac-ocache-range-btn" data-yac-range="week" aria-pressed="false"><?php echo esc_html( 'Last 7 days' ); ?></button>
-					</div>
 					<span class="yac-ocache-chip <?php echo esc_attr( $yac_ocache_chip[0] ); ?>"><?php echo esc_html( $yac_ocache_chip[1] ); ?></span>
 				</div>
 				<?php if ( null === $yac_ocache_samples || count( $yac_ocache_samples ) < 1 ) : ?>
@@ -1435,6 +1430,11 @@ function yac_ocache_render_admin_page() {
 						<div class="yac-ocache-chart-wrap">
 							<svg class="yac-ocache-chart" role="img" aria-label="hit rate and lookup volume over time"></svg>
 							<div class="yac-ocache-chart-tip" hidden></div>
+						</div>
+						<div class="yac-ocache-range" role="group" aria-label="<?php echo esc_attr( 'Trend range' ); ?>">
+							<button type="button" class="yac-ocache-range-btn is-active" data-yac-range="today" aria-pressed="true"><?php echo esc_html( 'Today' ); ?></button>
+							<button type="button" class="yac-ocache-range-btn" data-yac-range="yday" aria-pressed="false"><?php echo esc_html( 'Yesterday' ); ?></button>
+							<button type="button" class="yac-ocache-range-btn" data-yac-range="week" aria-pressed="false"><?php echo esc_html( 'Last 7 days' ); ?></button>
 						</div>
 						<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Shared memory running since %s (reset by a flush or restart); a dash means fewer than %s lookups in a bucket.', $yac_ocache_start_time ? date_i18n( 'M j, H:i', $yac_ocache_start_time ) : '—', number_format_i18n( YAC_OCACHE_WINDOW_MIN_LOOKUPS ) ) ); ?></p>
 					</div>
