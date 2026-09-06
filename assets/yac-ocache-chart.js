@@ -70,6 +70,9 @@
 	var LABELS = { rate: 'Hit rate', hits: 'Hits', miss: 'Misses' };
 	var FIELD  = { rate: 'rate', hits: 'h', miss: 'm' };
 	var ORDER  = [ 'hits', 'miss', 'rate' ]; /* rate drawn last, on top */
+	/* read order for the hover tooltip: the headline metric first, then the
+	   volumes. Draw order stays separate so the rate line keeps painting on top */
+	var TIP    = [ 'rate', 'hits', 'miss' ];
 	/* fixed granularity per view: today one point per 15-minute sample,
 	   yesterday per hour, the week per 6 hours. The 'min' columns feed
 	   today and yesterday, the hourly ones feed the week */
@@ -601,7 +604,7 @@
 		var head = when.toLocaleDateString( [], { month: 'short', day: 'numeric' } ) + ' ' +
 			when.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', hour12: false } );
 		var rows = '';
-		ORDER.forEach( function( key ) {
+		TIP.forEach( function( key ) {
 			var val = p[ FIELD[ key ] ];
 			var show = state.on[ key ] && null !== val;
 			view.dots[ key ].style.display = show ? '' : 'none';
