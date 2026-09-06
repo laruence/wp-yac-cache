@@ -65,12 +65,11 @@
 	.yac-ocache-entry-list.is-hidden { display: none; }
 	.yac-ocache-entry-bars .yac-ocache-entry-caption { color: #646970; font-size: 12px; padding-bottom: 2px; }
 	.yac-ocache-note { color: #646970; font-size: 12px; margin-top: 8px; }
-	.yac-ocache-health-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+	.yac-ocache-health-top { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 	.yac-ocache-windows { display: flex; flex-direction: column; gap: 12px; }
-	/* segmented range control below the chart; Roboto to match the chart
-	   face, pill group with a single highlight. align-self keeps it its own
-	   width inside the column-flex windows stack instead of stretching */
-	.yac-ocache-range { display: inline-flex; align-self: flex-start; padding: 2px; gap: 2px; background: #f0f0f1; border-radius: 8px; }
+	/* segmented range control, top-right of the panel; Roboto to match the
+	   chart face, pill group with a single highlight */
+	.yac-ocache-range { display: inline-flex; padding: 2px; gap: 2px; background: #f0f0f1; border-radius: 8px; }
 	.yac-ocache-range-btn { border: 0; background: none; border-radius: 6px; padding: 5px 14px; font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 500; letter-spacing: .2px; color: #646970; cursor: pointer; transition: background .12s, color .12s, box-shadow .12s; }
 	.yac-ocache-range-btn:hover { color: #1d2327; }
 	.yac-ocache-range-btn:focus-visible { outline: 2px solid #2271b1; outline-offset: 1px; }
@@ -105,10 +104,5 @@
 	.yac-ocache-chart-tip .row { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: #5f6368; }
 	.yac-ocache-chart-tip .row i { width: 10px; height: 3px; border-radius: 1px; flex: none; }
 	.yac-ocache-chart-tip .row b { margin-left: auto; padding-left: 18px; color: #202124; font-weight: 500; }
-	.yac-ocache-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 600; }
-	.yac-ocache-chip-good { background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; }
-	.yac-ocache-chip-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
-	.yac-ocache-chip-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
-	.yac-ocache-chip-warmup { background: #f0f0f1; border: 1px solid #dcdcde; color: #50575e; }
 	.yac-ocache-advice-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
 	.yac-ocache-advice-info { background: #f6f7f7; border: 1px solid #dcdcde; color: #50575e; }
