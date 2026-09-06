@@ -990,9 +990,9 @@ function yac_ocache_admin_enqueue_scripts( $hook ) {
 	) );
 
 	if ( $screen && false !== strpos( $screen->id, YAC_OCACHE_ADMIN_PAGE ) ) {
-		/* GSC's chart face is Roboto and its metric cards are Google Sans
-		   Text; without them the admin's system font reads off */
-		wp_enqueue_style( 'yac-ocache-fonts', 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&family=Google+Sans+Text:wght@400;500&display=swap', array(), YAC_OCACHE_VERSION );
+		/* GSC's chart face is Roboto; without it the admin's system font
+		   reads off against the chart, metrics and range buttons */
+		wp_enqueue_style( 'yac-ocache-fonts', 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap', array(), YAC_OCACHE_VERSION );
 		wp_enqueue_style( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache.css', array(), YAC_OCACHE_VERSION );
 		wp_enqueue_script( 'yac-ocache-chart', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-chart.js', array(), YAC_OCACHE_VERSION, true );
 		wp_enqueue_script( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-admin.js', array( 'yac-ocache-chart' ), YAC_OCACHE_VERSION, true );
@@ -1413,15 +1413,12 @@ function yac_ocache_render_admin_page() {
 				$yac_ocache_start_time = ! empty( $yac_ocache_samples ) ? (int) $yac_ocache_samples[0]['start_time'] : 0;
 				?>
 				<div class="yac-ocache-health-top">
+					<div class="yac-ocache-range" role="group" aria-label="<?php echo esc_attr( 'Trend range' ); ?>">
+						<button type="button" class="yac-ocache-range-btn is-active" data-yac-range="today" aria-pressed="true"><?php echo esc_html( 'Today' ); ?></button>
+						<button type="button" class="yac-ocache-range-btn" data-yac-range="yday" aria-pressed="false"><?php echo esc_html( 'Yesterday' ); ?></button>
+						<button type="button" class="yac-ocache-range-btn" data-yac-range="week" aria-pressed="false"><?php echo esc_html( 'Last 7 days' ); ?></button>
+					</div>
 					<span class="yac-ocache-chip <?php echo esc_attr( $yac_ocache_chip[0] ); ?>"><?php echo esc_html( $yac_ocache_chip[1] ); ?></span>
-					<label class="yac-ocache-range">
-						<span class="screen-reader-text"><?php echo esc_html( 'Trend range' ); ?></span>
-						<select class="yac-ocache-range-select" data-yac-range-select>
-							<option value="today" selected><?php echo esc_html( 'Today' ); ?></option>
-							<option value="yday"><?php echo esc_html( 'Yesterday' ); ?></option>
-							<option value="week"><?php echo esc_html( 'Last 7 days' ); ?></option>
-						</select>
-					</label>
 				</div>
 				<?php if ( null === $yac_ocache_samples || count( $yac_ocache_samples ) < 1 ) : ?>
 					<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Collecting samples (one per %s, across all workers) — the trend appears once the first sample lands.', yac_ocache_format_uptime( YAC_OCACHE_SAMPLE_INTERVAL ) ) ); ?></p>

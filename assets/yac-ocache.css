@@ -1,7 +1,7 @@
 	.yac-ocache-wrap { max-width: 1100px; margin-top: 12px; }
 	.yac-ocache-grid { display: flex; gap: 14px; flex-wrap: wrap; }
 	.yac-ocache-panel { background: #fff; border: 1px solid #dcdcde; border-radius: 8px; padding: 18px 20px; box-shadow: 0 1px 1px rgba(0, 0, 0, .04); }
-	.yac-ocache-panel > h2 { margin-top: 0; padding: 0; border: 0; font-size: 15px; }
+	.yac-ocache-wrap h2 { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; }
 	.yac-ocache-panel-note { color: #646970; font-size: 12px; margin: -4px 0 12px; }
 	.yac-ocache-donut-track { fill: none; stroke: #f0f0f1; stroke-width: 13; }
 	.yac-ocache-donut-fill { fill: none; stroke-width: 13; stroke-linecap: round; }
@@ -67,16 +67,20 @@
 	.yac-ocache-note { color: #646970; font-size: 12px; margin-top: 8px; }
 	.yac-ocache-health-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 	.yac-ocache-windows { display: flex; flex-direction: column; gap: 12px; }
-	.yac-ocache-range-select { border: 1px solid #dcdcde; border-radius: 4px; background: #fff; color: #50575e; font: inherit; font-size: 12px; padding: 3px 24px 3px 8px; cursor: pointer; }
-	.yac-ocache-range-select:hover { color: #135e96; border-color: #8c8f94; }
-	.yac-ocache-range-select:focus { border-color: #2271b1; box-shadow: 0 0 0 1px #2271b1; outline: 2px solid transparent; }
+	/* segmented range control, top-left of the panel; Roboto to match the
+	   chart face, pill group with a single sliding highlight */
+	.yac-ocache-range { display: inline-flex; padding: 2px; gap: 2px; background: #f0f0f1; border-radius: 8px; }
+	.yac-ocache-range-btn { border: 0; background: none; border-radius: 6px; padding: 5px 14px; font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 500; letter-spacing: .2px; color: #646970; cursor: pointer; transition: background .12s, color .12s, box-shadow .12s; }
+	.yac-ocache-range-btn:hover { color: #1d2327; }
+	.yac-ocache-range-btn:focus-visible { outline: 2px solid #2271b1; outline-offset: 1px; }
+	.yac-ocache-range-btn.is-active { background: #fff; color: #1d2327; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
 	/* one static summary line above the chart: series totals plus the
 	   window's fails/recycles. Not clickable, so no pointer affordance */
 	.yac-ocache-metrics { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
 	.yac-ocache-metric { display: inline-flex; align-items: baseline; gap: 6px; color: #a8a29e; }
-	.yac-ocache-metric-label { font-family: "Google Sans Text", "Google Sans", Roboto, -apple-system, sans-serif; font-size: 11px; font-weight: 500; letter-spacing: .2px; display: inline-flex; align-items: center; gap: 5px; }
+	.yac-ocache-metric-label { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 11px; font-weight: 500; letter-spacing: .2px; display: inline-flex; align-items: center; gap: 5px; }
 	.yac-ocache-metric[data-yac-series] .yac-ocache-metric-label::before { content: ""; width: 10px; height: 2px; border-radius: 1px; background: currentColor; flex: none; }
-	.yac-ocache-metric-val { font-family: "Google Sans Text", "Google Sans", Roboto, -apple-system, sans-serif; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+	.yac-ocache-metric-val { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
 	.yac-ocache-metric[data-yac-series="rate"] { color: #059669; }
 	.yac-ocache-metric[data-yac-series="hits"] { color: #2563eb; }
 	.yac-ocache-metric[data-yac-series="miss"] { color: #0891b2; }
@@ -91,7 +95,7 @@
 	.yac-ocache-chart-tip .row { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: #5f6368; }
 	.yac-ocache-chart-tip .row i { width: 10px; height: 3px; border-radius: 1px; flex: none; }
 	.yac-ocache-chart-tip .row b { margin-left: auto; padding-left: 18px; color: #202124; font-weight: 500; }
-	.yac-ocache-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 600; margin-top: 12px; }
+	.yac-ocache-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 14px; font-size: 13px; font-weight: 600; }
 	.yac-ocache-chip-good { background: #edfaef; border: 1px solid #b8e6bf; color: #1e7a31; }
 	.yac-ocache-chip-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
 	.yac-ocache-chip-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }

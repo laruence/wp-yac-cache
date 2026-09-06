@@ -567,13 +567,20 @@
 	svg.addEventListener( 'mousemove', onMove );
 	svg.addEventListener( 'mouseleave', onLeave );
 
-	document.querySelectorAll( '[data-yac-range-select]' ).forEach( function( sel ) {
-		sel.value = state.view;
-		sel.addEventListener( 'change', function() {
-			if ( ! data.ranges[ sel.value ] ) {
+	document.querySelectorAll( '[data-yac-range]' ).forEach( function( btn ) {
+		btn.classList.toggle( 'is-active', btn.getAttribute( 'data-yac-range' ) === state.view );
+		btn.setAttribute( 'aria-pressed', btn.getAttribute( 'data-yac-range' ) === state.view ? 'true' : 'false' );
+		btn.addEventListener( 'click', function() {
+			var next = btn.getAttribute( 'data-yac-range' );
+			if ( ! data.ranges[ next ] || next === state.view ) {
 				return;
 			}
-			state.view = sel.value;
+			state.view = next;
+			document.querySelectorAll( '[data-yac-range]' ).forEach( function( b ) {
+				var on = b === btn;
+				b.classList.toggle( 'is-active', on );
+				b.setAttribute( 'aria-pressed', on ? 'true' : 'false' );
+			} );
 			draw();
 		} );
 	} );
