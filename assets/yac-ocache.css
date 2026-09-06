@@ -78,15 +78,24 @@
 	   window's fails/recycles. Not clickable, so no pointer affordance */
 	.yac-ocache-metrics { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
 	.yac-ocache-metric { display: inline-flex; align-items: baseline; gap: 6px; color: #a8a29e; }
-	.yac-ocache-metric-label { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 11px; font-weight: 500; letter-spacing: .2px; display: inline-flex; align-items: center; gap: 5px; }
-	.yac-ocache-metric[data-yac-series] .yac-ocache-metric-label::before { content: ""; width: 10px; height: 2px; border-radius: 1px; background: currentColor; flex: none; }
+	/* label stays a plain inline box so its baseline is the text baseline;
+	   the colour swatch is absolutely positioned out of flow -- an in-flow
+	   empty bar would otherwise become the flex baseline and lift the label
+	   off the value's baseline */
+	.yac-ocache-metric-label { position: relative; font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 11px; font-weight: 400; letter-spacing: .2px; }
+	.yac-ocache-metric[data-yac-series] .yac-ocache-metric-label { padding-left: 15px; }
+	.yac-ocache-metric[data-yac-series] .yac-ocache-metric-label::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 11px; height: 2px; border-radius: 1px; background: currentColor; }
 	.yac-ocache-metric-val { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
 	.yac-ocache-metric[data-yac-series="rate"] { color: #059669; }
 	.yac-ocache-metric[data-yac-series="hits"] { color: #2563eb; }
-	.yac-ocache-metric[data-yac-series="miss"] { color: #0891b2; }
-	/* fails/recycles have no line of their own: neutral, pushed to the end */
-	.yac-ocache-metric-stat { color: #78716c; }
+	.yac-ocache-metric[data-yac-series="miss"] { color: #7c3aed; }
+	/* fails/recycles have no line of their own: a neutral chip so they read
+	   as counters, turning amber when the window actually logged some */
+	.yac-ocache-metric-stat { padding: 3px 11px; border-radius: 12px; background: #f5f5f4; border: 1px solid #e7e5e4; color: #57534e; }
+	.yac-ocache-metric-stat .yac-ocache-metric-val { font-weight: 600; }
 	.yac-ocache-metric-stat:last-child { margin-right: 0; }
+	.yac-ocache-metric-stat.is-hot { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+	.yac-ocache-metric-stat.is-hot .yac-ocache-metric-val { color: #b45309; }
 	.yac-ocache-chart-wrap { position: relative; }
 	.yac-ocache-chart { width: 100%; height: auto; display: block; }
 	.yac-ocache-chart text { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; letter-spacing: 0; }

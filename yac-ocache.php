@@ -1425,11 +1425,11 @@ function yac_ocache_render_admin_page() {
 				<?php else : ?>
 					<div class="yac-ocache-windows">
 						<div class="yac-ocache-metrics">
-							<span class="yac-ocache-metric" data-yac-series="rate"><span class="yac-ocache-metric-label"><?php echo esc_html( 'hit rate' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
-							<span class="yac-ocache-metric" data-yac-series="hits"><span class="yac-ocache-metric-label"><?php echo esc_html( 'hits' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
-							<span class="yac-ocache-metric" data-yac-series="miss"><span class="yac-ocache-metric-label"><?php echo esc_html( 'misses' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
-							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="fails"><span class="yac-ocache-metric-label"><?php echo esc_html( 'fails' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
-							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="recycles"><span class="yac-ocache-metric-label"><?php echo esc_html( 'recycles' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric" data-yac-series="rate"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Hit rate' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric" data-yac-series="hits"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Hits' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric" data-yac-series="miss"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Misses' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="fails"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Fails' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="recycles"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Recycles' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
 						</div>
 						<div class="yac-ocache-chart-wrap">
 							<svg class="yac-ocache-chart" role="img" aria-label="hit rate and lookup volume over time"></svg>

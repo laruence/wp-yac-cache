@@ -48,14 +48,26 @@
 			cards[ key ].querySelector( '.yac-ocache-metric-val' ).textContent = text;
 		}
 	}
+	/* fails/recycles chips light up only when the window actually logged
+	   some, so a quiet cache reads as neutral and any churn catches the eye */
+	function setStat( key, n ) {
+		var card = cards[ key ];
+		if ( ! card ) {
+			return;
+		}
+		card.querySelector( '.yac-ocache-metric-val' ).textContent = fmtK( n );
+		card.classList.toggle( 'is-hot', n > 0 );
+	}
 
 	var H = 190, PT = 16, PB = 22, PL = 30, PR = 40;
-	/* one blue-green family, but three separable hues so 1.25px lines
-	   stay tellable apart on white. The rate line swaps its own colour per vertex
-	   once a bucket crosses the plugin's verdict thresholds (90 / 70) */
-	var COLORS = { rate: '#059669', hits: '#2563eb', miss: '#0891b2' };
+	/* three hues far enough apart to tell 1.25px lines apart on white:
+	   green, blue, violet. Amber and red stay reserved for the rate line's
+	   own verdict levels so a warning never reads as the misses series.
+	   The rate line swaps its own colour per vertex once a bucket crosses
+	   the plugin's verdict thresholds (90 / 70) */
+	var COLORS = { rate: '#059669', hits: '#2563eb', miss: '#7c3aed' };
 	var LEVEL  = { g: '#059669', y: '#f59e0b', r: '#ef4444' };
-	var LABELS = { rate: 'hit rate', hits: 'hits', miss: 'misses' };
+	var LABELS = { rate: 'Hit rate', hits: 'Hits', miss: 'Misses' };
 	var FIELD  = { rate: 'rate', hits: 'h', miss: 'm' };
 	var ORDER  = [ 'hits', 'miss', 'rate' ]; /* rate drawn last, on top */
 	/* fixed granularity per view: today one point per 15-minute sample,
@@ -248,30 +260,64 @@
 		return { from: from, to: to, pts: pts, live: live, fails: f, recycles: r };
 	}
 
+	function mix( a, b, w ) {
+		return [ a[ 0 ] + ( b[ 0 ] - a[ 0 ] ) * w, a[ 1 ] + ( b[ 1 ] - a[ 1 ] ) * w ];
+	}
+
 	/* Catmull-Rom through the vertices as cubic Beziers: round turns,
 	   curve still passes every point so hover reads true values;
-	   control points clamp to the plot so spikes cannot overshoot */
-	function smoothPath( px, top, bot ) {
-		var n = px.length;
-		if ( ! n ) {
-			return '';
+	   control points clamp to the plot so spikes cannot overshoot.
+	   Returns one [p0, c1, c2, p1] tuple per pair of vertices, so a caller
+	   can recolour or split mid-segment without rebuilding the curve */
+	function beziers( px, top, bot ) {
+		var n = px.length, out = [];
+		if ( n < 2 ) {
+			return out;
 		}
-		if ( n < 3 ) {
-			return 'M' + px[ 0 ][ 0 ] + ' ' + px[ 0 ][ 1 ] + ( 2 === n ? ' L' + px[ 1 ][ 0 ] + ' ' + px[ 1 ][ 1 ] : '' );
+		if ( 2 === n ) {
+			/* straight run: control points on the line itself */
+			return [ [ px[ 0 ], mix( px[ 0 ], px[ 1 ], 1 / 3 ), mix( px[ 0 ], px[ 1 ], 2 / 3 ), px[ 1 ] ] ];
 		}
 		var clamp = function( v ) {
 			return Math.max( top - 1, Math.min( bot + 1, v ) );
 		};
-		var d = 'M' + px[ 0 ][ 0 ] + ' ' + px[ 0 ][ 1 ];
 		for ( var i = 0; i < n - 1; i++ ) {
 			var p0 = px[ Math.max( 0, i - 1 ) ];
 			var p1 = px[ i ];
 			var p2 = px[ i + 1 ];
 			var p3 = px[ Math.min( n - 1, i + 2 ) ];
-			d += ' C' + ( p1[ 0 ] + ( p2[ 0 ] - p0[ 0 ] ) / 6 ).toFixed( 1 ) + ' ' + clamp( p1[ 1 ] + ( p2[ 1 ] - p0[ 1 ] ) / 6 ).toFixed( 1 ) +
-				' ' + ( p2[ 0 ] - ( p3[ 0 ] - p1[ 0 ] ) / 6 ).toFixed( 1 ) + ' ' + clamp( p2[ 1 ] - ( p3[ 1 ] - p1[ 1 ] ) / 6 ).toFixed( 1 ) +
-				' ' + p2[ 0 ] + ' ' + p2[ 1 ];
+			out.push( [
+				p1,
+				[ p1[ 0 ] + ( p2[ 0 ] - p0[ 0 ] ) / 6, clamp( p1[ 1 ] + ( p2[ 1 ] - p0[ 1 ] ) / 6 ) ],
+				[ p2[ 0 ] - ( p3[ 0 ] - p1[ 0 ] ) / 6, clamp( p2[ 1 ] - ( p3[ 1 ] - p1[ 1 ] ) / 6 ) ],
+				p2
+			] );
 		}
+		return out;
+	}
+
+	/* de Casteljau at t = 0.5: the two halves of one cubic */
+	function splitHalf( b ) {
+		var a = mix( b[ 0 ], b[ 1 ], 0.5 );
+		var m = mix( b[ 1 ], b[ 2 ], 0.5 );
+		var z = mix( b[ 2 ], b[ 3 ], 0.5 );
+		var am = mix( a, m, 0.5 );
+		var mz = mix( m, z, 0.5 );
+		var mid = mix( am, mz, 0.5 );
+		return [ [ b[ 0 ], a, am, mid ], [ mid, mz, z, b[ 3 ] ] ];
+	}
+
+	function bezPath( list ) {
+		if ( ! list.length ) {
+			return '';
+		}
+		var f = function( p ) {
+			return p[ 0 ].toFixed( 1 ) + ' ' + p[ 1 ].toFixed( 1 );
+		};
+		var d = 'M' + f( list[ 0 ][ 0 ] );
+		list.forEach( function( b ) {
+			d += ' C' + f( b[ 1 ] ) + ' ' + f( b[ 2 ] ) + ' ' + f( b[ 3 ] );
+		} );
 		return d;
 	}
 
@@ -303,8 +349,8 @@
 		setCard( 'rate', ( sumH + sumM ) >= data.minLookups ? ( 100 * sumH / ( sumH + sumM ) ).toFixed( 1 ) + '%' : '—' );
 		setCard( 'hits', fmtK( sumH ) );
 		setCard( 'miss', fmtK( sumM ) );
-		setCard( 'fails', fmtK( v.fails ) );
-		setCard( 'recycles', fmtK( v.recycles ) );
+		setStat( 'fails', v.fails );
+		setStat( 'recycles', v.recycles );
 
 		if ( ! pts.length ) {
 			view = null;
@@ -405,75 +451,99 @@
 			d0.setTime( d0.getTime() + tickStep * 1000 );
 		}
 
-		/* smoothed series lines; a lone vertex draws as a square dot.
-		   The rate line is split per health level so a bucket that drops
-		   into warning or unhealthy territory shows as yellow/red */
+		/* one series as plot-space nodes. A bucket with too few lookups
+		   reads null; interior nulls are bridged by linear interpolation
+		   between the bracketing samples so the line stays continuous
+		   (the bridge's centre is the average of its two ends). Only
+		   leading/trailing nulls -- a window edge with no data either side
+		   of it -- stay open. */
+		function seriesNodes( key ) {
+			var vals = pts.map( function( p ) {
+				var raw = p[ FIELD[ key ] ];
+				return ( null === raw || undefined === raw ) ? null : raw;
+			} );
+			var i = 0;
+			while ( i < vals.length ) {
+				if ( null !== vals[ i ] ) {
+					i++;
+					continue;
+				}
+				var j = i;
+				while ( j < vals.length && null === vals[ j ] ) {
+					j++;
+				}
+				if ( i > 0 && j < vals.length ) {
+					var a = vals[ i - 1 ], b = vals[ j ];
+					for ( var k = i; k < j; k++ ) {
+						vals[ k ] = a + ( b - a ) * ( k - ( i - 1 ) ) / ( j - ( i - 1 ) );
+					}
+				}
+				i = j;
+			}
+			var nodes = [];
+			pts.forEach( function( p, idx ) {
+				if ( null === vals[ idx ] ) {
+					return;
+				}
+				nodes.push( {
+					x: x( p.t ),
+					y: 'rate' === key ? yRate( vals[ idx ] ) : yCnt( vals[ idx ] ),
+					lv: 'rate' === key ? levelOf( vals[ idx ] ) : null
+				} );
+			} );
+			return nodes;
+		}
+
+		/* smoothed series lines; a lone vertex draws as a square dot. The
+		   rate line changes colour at the *midpoint* of any segment whose
+		   two ends sit at different verdicts, so a bucket that drops into
+		   warning/unhealthy territory tints half the run-in and half the
+		   run-out rather than snapping the whole segment */
 		var ends = {};
 		ORDER.forEach( function( key ) {
 			if ( ! state.on[ key ] ) {
 				return;
 			}
-			var segs = [];
-			if ( 'rate' === key ) {
-				var run = [], runLv = null;
-				pts.forEach( function( p ) {
-					if ( null === p.rate ) {
-						if ( run.length ) {
-							segs.push( [ run, runLv ] );
-						}
-						run = [];
-						runLv = null;
-						return;
-					}
-					var lv = levelOf( p.rate );
-					if ( null !== runLv && lv !== runLv ) {
-						run.push( [ x( p.t ), yRate( p.rate ) ] );
-						segs.push( [ run, runLv ] );
-						run = [ [ x( p.t ), yRate( p.rate ) ] ];
-					} else {
-						run.push( [ x( p.t ), yRate( p.rate ) ] );
-					}
-					runLv = lv;
-				} );
-				if ( run.length ) {
-					segs.push( [ run, runLv ] );
-				}
-			} else {
-				var seg = [];
-				pts.forEach( function( p ) {
-					var val = p[ FIELD[ key ] ];
-					if ( null === val ) {
-						if ( seg.length ) {
-							segs.push( [ seg, key ] );
-						}
-						seg = [];
-						return;
-					}
-					seg.push( [ x( p.t ), yOf[ key ]( val ) ] );
-				} );
-				if ( seg.length ) {
-					segs.push( [ seg, key ] );
-				}
+			var nodes = seriesNodes( key );
+			if ( ! nodes.length ) {
+				return;
 			}
-			segs.forEach( function( s ) {
-				var color = 'rate' === key ? LEVEL[ s[ 1 ] ] : COLORS[ key ];
-				if ( 1 === s[ 0 ].length ) {
-					mk( 'rect', { x: s[ 0 ][ 0 ][ 0 ] - 2, y: s[ 0 ][ 0 ][ 1 ] - 2, width: 4, height: 4, fill: color } );
-					return;
-				}
-				mk( 'path', {
-					d: smoothPath( s[ 0 ], PT, bot ),
-					fill: 'none',
-					stroke: color,
-					'stroke-width': 1.25,
-					'stroke-linejoin': 'round',
-					'stroke-linecap': 'round'
-				} );
+			var coords = nodes.map( function( n ) {
+				return [ n.x, n.y ];
 			} );
-			if ( segs.length ) {
-				var tail = segs[ segs.length - 1 ][ 0 ];
-				ends[ key ] = { p: tail[ tail.length - 1 ], color: 'rate' === key ? LEVEL[ segs[ segs.length - 1 ][ 1 ] ] : COLORS[ key ] };
+
+			if ( 1 === nodes.length ) {
+				mk( 'rect', {
+					x: nodes[ 0 ].x - 2, y: nodes[ 0 ].y - 2, width: 4, height: 4,
+					fill: 'rate' === key ? LEVEL[ nodes[ 0 ].lv ] : COLORS[ key ]
+				} );
+			} else if ( 'rate' === key ) {
+				beziers( coords, PT, bot ).forEach( function( b, s ) {
+					var lvA = nodes[ s ].lv, lvB = nodes[ s + 1 ].lv;
+					var stroke = function( d, lv ) {
+						mk( 'path', {
+							d: d, fill: 'none', stroke: LEVEL[ lv ], 'stroke-width': 1.25,
+							'stroke-linejoin': 'round', 'stroke-linecap': 'round'
+						} );
+					};
+					if ( lvA === lvB ) {
+						stroke( bezPath( [ b ] ), lvA );
+					} else {
+						var halves = splitHalf( b );
+						stroke( bezPath( [ halves[ 0 ] ] ), lvA );
+						stroke( bezPath( [ halves[ 1 ] ] ), lvB );
+					}
+				} );
+			} else {
+				mk( 'path', {
+					d: bezPath( beziers( coords, PT, bot ) ),
+					fill: 'none', stroke: COLORS[ key ], 'stroke-width': 1.25,
+					'stroke-linejoin': 'round', 'stroke-linecap': 'round'
+				} );
 			}
+
+			var lastN = nodes[ nodes.length - 1 ];
+			ends[ key ] = { p: [ lastN.x, lastN.y ], color: 'rate' === key ? LEVEL[ lastN.lv ] : COLORS[ key ] };
 		} );
 
 		/* 'today' is still counting: pulse a dot at each line's end */
