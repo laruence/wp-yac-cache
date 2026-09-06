@@ -791,6 +791,7 @@ function yac_ocache_health( $info, $snapshot ) {
 	$keys_pct  = $keys_total > 0 ? $keys_used / $keys_total * 100 : 0;
 
 	$values_total = (int) $info['values_memory_size'];
+	$occupied     = $snapshot ? (float) $snapshot['occupied'] : 0;
 	$vals_pct     = $values_total > 0 ? $occupied / $values_total * 100 : 0;
 
 	$lookups = (int) $info['hits'] + (int) $info['miss'];
