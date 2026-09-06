@@ -33,13 +33,13 @@ if ( ! defined( 'YAC_OCACHE_WARMUP_LOOKUPS' ) ) {
 if ( ! defined( 'YAC_OCACHE_SAMPLE_INTERVAL' ) ) {
 	/* hit-rate sampling cadence in seconds; a Yac claim throttles the
 	   writers to one per interval across all workers */
-	define( 'YAC_OCACHE_SAMPLE_INTERVAL', 300 );
+	define( 'YAC_OCACHE_SAMPLE_INTERVAL', 900 );
 }
 
 if ( ! defined( 'YAC_OCACHE_SAMPLE_MAX' ) ) {
 	/* ring buffer length: MAX × INTERVAL ≈ 7 days of history
-	   (2016 × 5 min ≈ 220 KB in one option row) */
-	define( 'YAC_OCACHE_SAMPLE_MAX', 2016 );
+	   (672 × 15 min ≈ 75 KB in one option row) */
+	define( 'YAC_OCACHE_SAMPLE_MAX', 672 );
 }
 
 if ( ! defined( 'YAC_OCACHE_WINDOW_MIN_LOOKUPS' ) ) {
@@ -672,250 +672,107 @@ function yac_ocache_hitrate_windows( $samples, $info, array $window_seconds ) {
 	return $out;
 }
 
-/* time-series line chart of the hit rate: each vertex is the rate over
-   the trailing 5 samples, idle stretches (too few lookups to trust)
-   break the line. A week of 5-minute samples (2000+) gets thinned to
-   ~480 vertices first. Y axis 0-100% with grid; X axis aligned ticks */
-/* three-series trend chart: hit rate on the left axis (0-100%), hits
-   and misses on the right axis (per sample, normalized to a 5-minute
-   pace so the 7d hourly decimation stays comparable). Idle stretches
-   break the lines; 7d samples thin to one per hour. The top-left badge
-   reports the fails/recycles accumulated over the visible range */
-function yac_ocache_chart( $samples, $info, $range_seconds, $width = 460, $height = 160 ) {
-	$now   = time();
-	$since = $now - $range_seconds;
+/* Raw series payload for the client-side chart, columnar to keep the
+   inline JSON small. Two resolutions because the three views need
+   different ones: 'min' holds 15-minute deltas for the last 48 hours
+   (today and yesterday), 'hr' holds hourly buckets for the whole
+   retained week. 'ranges' carries the calendar boundaries computed
+   server-side so the browser does not have to guess the site timezone
+   (or a DST day's real length). The live counters fold into the last
+   vertex of each set -- a partial trailing bucket of its own would dip
+   the count lines. */
+function yac_ocache_chart_data( $samples, $info ) {
+	$now  = time();
+	$zone = function_exists( 'wp_timezone' ) ? wp_timezone() : null;
 
-	/* indices of the samples inside the visible window. A live "now"
-	   pseudo sample from the live counters is appended so the line
-	   reaches the present edge and a single stored record still plots
-	   one point */
-	$indices = array();
+	$day_start = $zone
+		? (int) ( new DateTimeImmutable( 'today midnight', $zone ) )->getTimestamp()
+		: (int) strtotime( 'today midnight' );
+	$day_end   = $zone
+		? (int) ( new DateTimeImmutable( 'tomorrow midnight', $zone ) )->getTimestamp()
+		: (int) strtotime( 'tomorrow midnight' );
+	$yday_end  = $day_start;
+	$yday_start = $zone
+		? (int) ( new DateTimeImmutable( 'yesterday midnight', $zone ) )->getTimestamp()
+		: $day_start - DAY_IN_SECONDS;
+	$week_start = $zone
+		? (int) ( new DateTimeImmutable( '-6 days midnight', $zone ) )->getTimestamp()
+		: $day_start - 6 * DAY_IN_SECONDS;
+
+	$min_since = $yday_start;
+
+	$min = array( 't' => array(), 'h' => array(), 'm' => array(), 'f' => array(), 'r' => array() );
+	$hr  = array( 't' => array(), 'h' => array(), 'm' => array(), 'f' => array(), 'r' => array() );
+
 	foreach ( $samples as $i => $sample ) {
-		if ( $sample['time'] >= $since ) {
-			$indices[] = $i;
+		$base   = $samples[ max( 0, $i - 1 ) ];
+		$d_hits = (int) $sample['hits'] - (int) $base['hits'];
+		$d_miss = (int) $sample['miss'] - (int) $base['miss'];
+
+		if ( $sample['time'] >= $min_since ) {
+			$min['t'][] = (int) $sample['time'];
+			$min['h'][] = $d_hits;
+			$min['m'][] = $d_miss;
+			$min['f'][] = isset( $sample['fails'] ) ? (int) $sample['fails'] : 0;
+			$min['r'][] = isset( $sample['recycles'] ) ? (int) $sample['recycles'] : 0;
 		}
-	}
-	if ( empty( $indices ) ) {
-		return '';
+
+		$hour = (int) floor( $sample['time'] / HOUR_IN_SECONDS ) * HOUR_IN_SECONDS;
+		if ( ! $hr['t'] || end( $hr['t'] ) !== $hour ) {
+			$hr['t'][] = $hour;
+			$hr['h'][] = 0;
+			$hr['m'][] = 0;
+		}
+		$last           = count( $hr['t'] ) - 1;
+		$hr['h'][ $last ] += $d_hits;
+		$hr['m'][ $last ] += $d_miss;
+		$hr['f'][ $last ]  = isset( $sample['fails'] ) ? (int) $sample['fails'] : 0;
+		$hr['r'][ $last ]  = isset( $sample['recycles'] ) ? (int) $sample['recycles'] : 0;
 	}
 
-	/* extend the series to "now" with the live counters (they are
-	   cumulative since the same shared-memory start, so the delta is
-	   valid); skip when nothing moved since the last sample */
-	$live = null;
-	if ( $info ) {
-		$last_i   = $indices[ count( $indices ) - 1 ];
-		$last_s   = $samples[ $last_i ];
-		$now_hits = (int) $info['hits'];
-		$now_miss = (int) $info['miss'];
-		if ( $now_hits + $now_miss > $last_s['hits'] + $last_s['miss'] ) {
-			$live = array(
-				'time'     => $now,
-				'hits'     => $now_hits,
-				'miss'     => $now_miss,
-				'fails'    => (int) $info['fails'],
-				'recycles' => (int) $info['recycles'],
-			);
-		}
-	}
-
-	/* 7d keeps one sample per hour (168 points), matching the day ticks;
-	   24h keeps every 5-minute sample. The generic fallback thins any
-	   longer series to ~480 vertices so the polyline stays cheap */
-	if ( $range_seconds > DAY_IN_SECONDS ) {
-		$hourly  = array();
-		$last_hr = null;
-		foreach ( $indices as $index ) {
-			$hr = (int) floor( $samples[ $index ]['time'] / HOUR_IN_SECONDS );
-			if ( $hr !== $last_hr ) {
-				$hourly[] = $index;
-				$last_hr  = $hr;
+	/* fold the live counters in as the trailing vertex of each set */
+	if ( $info && $samples ) {
+		$last_s = $samples[ count( $samples ) - 1 ];
+		$dh     = (int) $info['hits'] - (int) $last_s['hits'];
+		$dm     = (int) $info['miss'] - (int) $last_s['miss'];
+		if ( $dh + $dm > 0 ) {
+			if ( $min['t'] ) {
+				$min['t'][] = $now;
+				$min['h'][] = $dh;
+				$min['m'][] = $dm;
+				$min['f'][] = isset( $info['fails'] ) ? (int) $info['fails'] : 0;
+				$min['r'][] = isset( $info['recycles'] ) ? (int) $info['recycles'] : 0;
+			}
+			$hour = (int) floor( $now / HOUR_IN_SECONDS ) * HOUR_IN_SECONDS;
+			if ( $hr['t'] && end( $hr['t'] ) === $hour ) {
+				$last             = count( $hr['t'] ) - 1;
+				$hr['h'][ $last ] += $dh;
+				$hr['m'][ $last ] += $dm;
+			} else {
+				$hr['t'][] = $hour;
+				$hr['h'][] = $dh;
+				$hr['m'][] = $dm;
 			}
 		}
-		if ( end( $hourly ) !== end( $indices ) ) {
-			$hourly[] = end( $indices );
-		}
-		$indices = $hourly;
-	}
-
-	if ( count( $indices ) > 480 ) {
-		$step    = (int) ceil( count( $indices ) / 480 );
-		$thinned = array();
-		foreach ( $indices as $pos => $index ) {
-			if ( 0 === $pos % $step ) {
-				$thinned[] = $index;
-			}
-		}
-		if ( end( $thinned ) !== end( $indices ) ) {
-			$thinned[] = end( $indices );
-		}
-		$indices = $thinned;
-	}
-
-	$pad_l  = 34;
-	$pad_r  = 40;
-	$pad_t  = 26;
-	$pad_b  = 20;
-	$plot_w = $width - $pad_l - $pad_r;
-	$plot_h = $height - $pad_t - $pad_b;
-
-	/* per-vertex series; rate below MIN_LOOKUPS per sample breaks the
-	   lines (too noisy to trust), hits/misses always plot when the
-	   sample moved */
-	$rate_pts = array();
-	$hit_pts  = array();
-	$miss_pts = array();
-	$max_rate = 1;
-	foreach ( $indices as $i ) {
-		$sample   = $samples[ $i ];
-		$base     = $samples[ max( 0, $i - 1 ) ];
-		$d_hits   = $sample['hits'] - $base['hits'];
-		$d_miss   = $sample['miss'] - $base['miss'];
-		$d_look   = $d_hits + $d_miss;
-		$x        = round( $pad_l + ( $sample['time'] - $since ) / $range_seconds * $plot_w, 1 );
-		$rate_pts[] = $d_look >= YAC_OCACHE_WINDOW_MIN_LOOKUPS ? array( $x, round( $pad_t + $plot_h - $plot_h * $d_hits / $d_look, 1 ) ) : array( $x, null );
-		$hit_pts[]  = $d_look > 0 ? array( $x, $d_hits ) : array( $x, null );
-		$miss_pts[] = $d_look > 0 ? array( $x, $d_miss ) : array( $x, null );
-		$max_rate   = max( $max_rate, $d_hits, $d_miss );
-	}
-
-	/* live vertex: delta from the last stored sample to the live
-	   counters, so the lines reach the present edge */
-	if ( $live ) {
-		$base       = $samples[ $indices[ count( $indices ) - 1 ] ];
-		$d_hits     = $live['hits'] - $base['hits'];
-		$d_miss     = $live['miss'] - $base['miss'];
-		$d_look     = $d_hits + $d_miss;
-		$x          = round( $pad_l + ( $live['time'] - $since ) / $range_seconds * $plot_w, 1 );
-		$rate_pts[] = $d_look >= YAC_OCACHE_WINDOW_MIN_LOOKUPS ? array( $x, round( $pad_t + $plot_h - $plot_h * $d_hits / $d_look, 1 ) ) : array( $x, null );
-		$hit_pts[]  = $d_look > 0 ? array( $x, $d_hits ) : array( $x, null );
-		$miss_pts[] = $d_look > 0 ? array( $x, $d_miss ) : array( $x, null );
-		$max_rate   = max( $max_rate, $d_hits, $d_miss );
-	}
-
-	$series_line = function ( $pts, $max_v ) use ( $pad_t, $plot_h ) {
-		$segments = array();
-		$segment  = array();
-		foreach ( $pts as $p ) {
-			if ( null === $p[1] ) {
-				if ( count( $segment ) > 1 ) {
-					$segments[] = $segment;
-				}
-				$segment = array();
-				continue;
-			}
-			$segment[] = $p[0] . ',' . round( $pad_t + $plot_h - $plot_h * $p[1] / $max_v, 1 );
-		}
-		if ( count( $segment ) > 1 ) {
-			$segments[] = $segment;
-		}
-		return $segments;
-	};
-
-	$series_dots = function ( $pts, $max_v ) use ( $pad_t, $plot_h ) {
-		$single = count( array_filter( $pts, function ( $p ) { return null !== $p[1]; } ) ) === 1;
-		if ( ! $single ) {
-			return '';
-		}
-		$dots = '';
-		foreach ( $pts as $p ) {
-			if ( null !== $p[1] ) {
-				$dots .= '<circle cx="' . $p[0] . '" cy="' . round( $pad_t + $plot_h - $plot_h * $p[1] / $max_v, 1 ) . '" r="3"/>';
-			}
-		}
-		return $dots;
-	};
-
-	/* nothing moved in the whole range: no vertex on any series, so an
-	   empty axis frame would be all show — return nothing to draw */
-	$has_visible = false;
-	foreach ( array( $rate_pts, $hit_pts, $miss_pts ) as $pts ) {
-		foreach ( $pts as $p ) {
-			if ( null !== $p[1] ) {
-				$has_visible = true;
-				break 2;
-			}
+		if ( $hr['t'] ) {
+			$last             = count( $hr['t'] ) - 1;
+			$hr['f'][ $last ] = isset( $info['fails'] ) ? (int) $info['fails'] : 0;
+			$hr['r'][ $last ] = isset( $info['recycles'] ) ? (int) $info['recycles'] : 0;
 		}
 	}
-	if ( ! $has_visible ) {
-		return '';
-	}
 
-	$svg = '';
-
-	/* left axis: hit rate 0-100% */
-	foreach ( array( 25, 50, 75, 100 ) as $pct ) {
-		$y    = round( $pad_t + $plot_h - $plot_h * $pct / 100, 1 );
-		$svg .= '<line x1="' . $pad_l . '" y1="' . $y . '" x2="' . ( $width - $pad_r ) . '" y2="' . $y . '" stroke="#e0e0e1" stroke-width="1"/>'
-			. '<text x="' . ( $pad_l - 4 ) . '" y="' . ( $y + 3 ) . '" text-anchor="end" font-size="9" fill="#8c8f94">' . $pct . '</text>';
-	}
-
-	/* right axis: max of the hits/misses peaks, rounded up to 1/2/5 */
-	$pow  = pow( 10, strlen( (string) $max_rate ) - 1 );
-	$nice = (int) ( ceil( $max_rate / $pow ) * $pow );
-	foreach ( array( 0, 0.25, 0.5, 0.75, 1 ) as $f ) {
-		$y    = round( $pad_t + $plot_h - $plot_h * $f, 1 );
-		$svg .= '<text x="' . ( $width - $pad_r + 4 ) . '" y="' . ( $y + 3 ) . '" text-anchor="start" font-size="9" fill="#8c8f94">' . esc_html( yac_ocache_format_kmb( $nice * $f ) ) . '</text>';
-	}
-
-	/* X ticks aligned to the clock (6 h steps for a day, midnight for
-	   a week) instead of floating offsets from "now" */
-	$tick_step = $range_seconds <= DAY_IN_SECONDS ? 6 * HOUR_IN_SECONDS : DAY_IN_SECONDS;
-	$tick_fmt  = $range_seconds <= DAY_IN_SECONDS ? 'H:i' : 'M j';
-	$first     = (int) ceil( $since / $tick_step ) * $tick_step;
-	for ( $t = $first, $guard = 0; $t <= $now && $guard < 32; $t += $tick_step, $guard++ ) {
-		$x    = round( $pad_l + ( $t - $since ) / $range_seconds * $plot_w, 1 );
-		$svg .= '<text x="' . $x . '" y="' . ( $height - 6 ) . '" text-anchor="middle" font-size="9" fill="#8c8f94">' . esc_html( date_i18n( $tick_fmt, $t ) ) . '</text>';
-	}
-
-	/* three lines; single visible vertices render as dots */
-	$svg .= '<g fill="none" stroke-width="1.5">';
-	foreach ( array(
-		array( $series_line( $rate_pts, 100 ), '#00a32a' ),
-		array( $series_line( $hit_pts, $nice ), '#2271b1' ),
-		array( $series_line( $miss_pts, $nice ), '#d63638' ),
-	) as $line ) {
-		foreach ( $line[0] as $segment ) {
-			$svg .= '<polyline stroke="' . $line[1] . '" points="' . esc_attr( implode( ' ', $segment ) ) . '"/>';
-		}
-	}
-	$svg .= '</g>';
-	$svg .= '<g stroke="none">';
-	$svg .= '<g fill="#00a32a">' . $series_dots( $rate_pts, 100 ) . '</g>';
-	$svg .= '<g fill="#2271b1">' . $series_dots( $hit_pts, $nice ) . '</g>';
-	$svg .= '<g fill="#d63638">' . $series_dots( $miss_pts, $nice ) . '</g>';
-	$svg .= '</g>';
-
-	/* fails / recycles accumulated over the visible range; counters are
-	   cumulative since the shared-memory start, so clamp the anchor to
-	   the range even when it began before our samples do */
-	if ( $info ) {
-		$anchor = null;
-		foreach ( $samples as $sample ) {
-			if ( $sample['time'] > $since ) {
-				break;
-			}
-			$anchor = $sample;
-		}
-		if ( null === $anchor ) {
-			$anchor = $samples[0];
-		}
-		$badge = sprintf(
-			'fails %s &middot; recycles %s',
-			esc_html( yac_ocache_format_kmb( max( 0, (int) $info['fails'] - $anchor['fails'] ) ) ),
-			esc_html( yac_ocache_format_kmb( max( 0, (int) $info['recycles'] - $anchor['recycles'] ) ) )
-		);
-		$svg .= '<text x="' . $pad_l . '" y="14" font-size="10" fill="#50575e">' . $badge . '</text>';
-	}
-
-	/* legend in the top-right corner */
-	$svg .= '<text x="' . ( $width - $pad_r ) . '" y="14" text-anchor="end" font-size="9">'
-		. '<tspan fill="#00a32a">&#9632; hit rate</tspan>'
-		. '<tspan fill="#2271b1" dx="8">&#9632; hits</tspan>'
-		. '<tspan fill="#d63638" dx="8">&#9632; misses</tspan>'
-		. '</text>';
-
-	return '<svg class="yac-ocache-chart" viewBox="0 0 ' . (int) $width . ' ' . (int) $height . '" width="100%" role="img" aria-label="hit rate and lookup volume over time">' . $svg . '</svg>';
+	return array(
+		'min'        => $min,
+		'hr'         => $hr,
+		'ranges'     => array(
+			'today' => array( $day_start, $day_end ),
+			'yday'  => array( $yday_start, $yday_end ),
+			'week'  => array( $week_start, $day_end ),
+		),
+		'now'        => $now,
+		'interval'   => YAC_OCACHE_SAMPLE_INTERVAL,
+		'minLookups' => YAC_OCACHE_WINDOW_MIN_LOOKUPS,
+	);
 }
 
 /* health verdict from keys/values fullness + hit rate. 'causes' names
@@ -1133,8 +990,12 @@ function yac_ocache_admin_enqueue_scripts( $hook ) {
 	) );
 
 	if ( $screen && false !== strpos( $screen->id, YAC_OCACHE_ADMIN_PAGE ) ) {
+		/* GSC's chart face is Roboto and its metric cards are Google Sans
+		   Text; without them the admin's system font reads off */
+		wp_enqueue_style( 'yac-ocache-fonts', 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&family=Google+Sans+Text:wght@400;500&display=swap', array(), YAC_OCACHE_VERSION );
 		wp_enqueue_style( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache.css', array(), YAC_OCACHE_VERSION );
-		wp_enqueue_script( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-admin.js', array(), YAC_OCACHE_VERSION, true );
+		wp_enqueue_script( 'yac-ocache-chart', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-chart.js', array(), YAC_OCACHE_VERSION, true );
+		wp_enqueue_script( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-admin.js', array( 'yac-ocache-chart' ), YAC_OCACHE_VERSION, true );
 	}
 }
 
@@ -1548,45 +1409,38 @@ function yac_ocache_render_admin_page() {
 			<h2><?php echo esc_html( 'Cache health' ); ?></h2>
 			<div class="yac-ocache-panel">
 				<?php
-				$yac_ocache_samples = yac_ocache_hitrate_samples();
-				// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only view state for the range tab
-				$yac_ocache_range     = ( isset( $_GET['yac_hitrange'] ) && '7d' === sanitize_key( wp_unslash( $_GET['yac_hitrange'] ) ) ) ? '7d' : '24h';
-				$yac_ocache_range_map = array( '24h' => DAY_IN_SECONDS, '7d' => 7 * DAY_IN_SECONDS );
-				$yac_ocache_range_s   = $yac_ocache_range_map[ $yac_ocache_range ];
-
-				$yac_ocache_windows = yac_ocache_hitrate_windows( $yac_ocache_samples, $info, array(
-					'1h'  => HOUR_IN_SECONDS,
-					'24h' => DAY_IN_SECONDS,
-					'7d'  => 7 * DAY_IN_SECONDS,
-				) );
-
-				$yac_ocache_window_cell = function ( $label, $window ) {
-					$text  = null === $window['rate'] ? '—' : round( $window['rate'], 1 ) . '%';
-					$title = null === $window['rate']
-						? sprintf( 'fewer than %s lookups in the last %s', number_format_i18n( YAC_OCACHE_WINDOW_MIN_LOOKUPS ), $label )
-						: sprintf( '%s lookups', number_format_i18n( $window['lookups'] ) );
-					return '<li><span>' . esc_html( $label ) . '</span><strong title="' . esc_attr( $title ) . '">' . esc_html( $text ) . '</strong></li>';
-				};
+				$yac_ocache_samples    = yac_ocache_hitrate_samples();
+				$yac_ocache_start_time = ! empty( $yac_ocache_samples ) ? (int) $yac_ocache_samples[0]['start_time'] : 0;
 				?>
 				<div class="yac-ocache-health-top">
 					<span class="yac-ocache-chip <?php echo esc_attr( $yac_ocache_chip[0] ); ?>"><?php echo esc_html( $yac_ocache_chip[1] ); ?></span>
-					<div class="yac-ocache-tabs" role="tablist">
-						<a href="<?php echo esc_url( add_query_arg( 'yac_hitrange', '24h' ) ); ?>" class="yac-ocache-tab<?php echo '24h' === $yac_ocache_range ? ' is-active' : ''; ?>"><?php echo esc_html( '24 hours' ); ?></a>
-						<a href="<?php echo esc_url( add_query_arg( 'yac_hitrange', '7d' ) ); ?>" class="yac-ocache-tab<?php echo '7d' === $yac_ocache_range ? ' is-active' : ''; ?>"><?php echo esc_html( '7 days' ); ?></a>
-					</div>
+					<label class="yac-ocache-range">
+						<span class="screen-reader-text"><?php echo esc_html( 'Trend range' ); ?></span>
+						<select class="yac-ocache-range-select" data-yac-range-select>
+							<option value="today" selected><?php echo esc_html( 'Today' ); ?></option>
+							<option value="yday"><?php echo esc_html( 'Yesterday' ); ?></option>
+							<option value="week"><?php echo esc_html( 'Last 7 days' ); ?></option>
+						</select>
+					</label>
 				</div>
 				<?php if ( null === $yac_ocache_samples || count( $yac_ocache_samples ) < 1 ) : ?>
 					<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Collecting samples (one per %s, across all workers) — the trend appears once the first sample lands.', yac_ocache_format_uptime( YAC_OCACHE_SAMPLE_INTERVAL ) ) ); ?></p>
 				<?php else : ?>
 					<div class="yac-ocache-windows">
-						<?php echo yac_ocache_chart( $yac_ocache_samples, $info, $yac_ocache_range_s ); // phpcs:ignore WordPress.Security.EscapeOutput -- every interpolation inside is escaped ?>
-						<ul class="yac-ocache-window-stats">
-							<?php echo $yac_ocache_window_cell( '1 h', $yac_ocache_windows['1h'] ); // phpcs:ignore WordPress.Security.EscapeOutput -- assembled from escaped parts ?>
-							<?php echo $yac_ocache_window_cell( '24 h', $yac_ocache_windows['24h'] ); // phpcs:ignore WordPress.Security.EscapeOutput -- assembled from escaped parts ?>
-							<?php echo $yac_ocache_window_cell( '7 d', $yac_ocache_windows['7d'] ); // phpcs:ignore WordPress.Security.EscapeOutput -- assembled from escaped parts ?>
-						</ul>
-						<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Sampling started %s (reset by a flush or shared-memory restart); a dash means fewer than %s lookups in the window.', date_i18n( 'M j, H:i', (int) $yac_ocache_windows['start_time'] ), number_format_i18n( YAC_OCACHE_WINDOW_MIN_LOOKUPS ) ) ); ?></p>
+						<div class="yac-ocache-metrics">
+							<span class="yac-ocache-metric" data-yac-series="rate"><span class="yac-ocache-metric-label"><?php echo esc_html( 'hit rate' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric" data-yac-series="hits"><span class="yac-ocache-metric-label"><?php echo esc_html( 'hits' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric" data-yac-series="miss"><span class="yac-ocache-metric-label"><?php echo esc_html( 'misses' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="fails"><span class="yac-ocache-metric-label"><?php echo esc_html( 'fails' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="recycles"><span class="yac-ocache-metric-label"><?php echo esc_html( 'recycles' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+						</div>
+						<div class="yac-ocache-chart-wrap">
+							<svg class="yac-ocache-chart" role="img" aria-label="hit rate and lookup volume over time"></svg>
+							<div class="yac-ocache-chart-tip" hidden></div>
+						</div>
+						<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Shared memory running since %s (reset by a flush or restart); a dash means fewer than %s lookups in a bucket.', $yac_ocache_start_time ? date_i18n( 'M j, H:i', $yac_ocache_start_time ) : '—', number_format_i18n( YAC_OCACHE_WINDOW_MIN_LOOKUPS ) ) ); ?></p>
 					</div>
+					<script type="application/json" id="yac-ocache-chart-data"><?php echo wp_json_encode( yac_ocache_chart_data( $yac_ocache_samples, $info ), JSON_HEX_TAG | JSON_HEX_AMP ); // phpcs:ignore WordPress.Security.EscapeOutput -- numeric columns only, hex-flagged for the inline context ?></script>
 				<?php endif; ?>
 
 				<?php if ( 'warmup' === $health['verdict'] ) : ?>
