@@ -1409,13 +1409,6 @@ function yac_ocache_render_admin_page() {
 					<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Collecting samples (one per %s, across all workers) — the trend appears once the first sample lands.', yac_ocache_format_uptime( YAC_OCACHE_SAMPLE_INTERVAL ) ) ); ?></p>
 				<?php else : ?>
 					<div class="yac-ocache-health-top">
-						<div class="yac-ocache-range" role="group" aria-label="<?php echo esc_attr( 'Trend range' ); ?>">
-							<button type="button" class="yac-ocache-range-btn is-active" data-yac-range="today" aria-pressed="true"><?php echo esc_html( 'Today' ); ?></button>
-							<button type="button" class="yac-ocache-range-btn" data-yac-range="yday" aria-pressed="false"><?php echo esc_html( 'Yesterday' ); ?></button>
-							<button type="button" class="yac-ocache-range-btn" data-yac-range="week" aria-pressed="false"><?php echo esc_html( 'Last 7 days' ); ?></button>
-						</div>
-					</div>
-					<div class="yac-ocache-windows">
 						<div class="yac-ocache-metrics">
 							<span class="yac-ocache-metric" data-yac-series="rate"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Hit rate' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
 							<span class="yac-ocache-metric" data-yac-series="hits"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Hits' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
@@ -1423,6 +1416,13 @@ function yac_ocache_render_admin_page() {
 							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="fails"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Fails' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
 							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="recycles"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Recycles' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
 						</div>
+						<div class="yac-ocache-range" role="group" aria-label="<?php echo esc_attr( 'Trend range' ); ?>">
+							<button type="button" class="yac-ocache-range-btn is-active" data-yac-range="today" aria-pressed="true"><?php echo esc_html( 'Today' ); ?></button>
+							<button type="button" class="yac-ocache-range-btn" data-yac-range="yday" aria-pressed="false"><?php echo esc_html( 'Yesterday' ); ?></button>
+							<button type="button" class="yac-ocache-range-btn" data-yac-range="week" aria-pressed="false"><?php echo esc_html( 'Last 7 days' ); ?></button>
+						</div>
+					</div>
+					<div class="yac-ocache-windows">
 						<div class="yac-ocache-chart-wrap">
 							<svg class="yac-ocache-chart" role="img" aria-label="hit rate and lookup volume over time"></svg>
 							<div class="yac-ocache-chart-tip" hidden></div>

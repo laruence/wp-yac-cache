@@ -65,10 +65,11 @@
 	.yac-ocache-entry-list.is-hidden { display: none; }
 	.yac-ocache-entry-bars .yac-ocache-entry-caption { color: #646970; font-size: 12px; padding-bottom: 2px; }
 	.yac-ocache-note { color: #646970; font-size: 12px; margin-top: 8px; }
-	.yac-ocache-health-top { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+	/* metrics on the left, range control on the right, one row */
+	.yac-ocache-health-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 	.yac-ocache-windows { display: flex; flex-direction: column; gap: 12px; }
-	/* segmented range control, top-right of the panel; Roboto to match the
-	   chart face, pill group with a single highlight */
+	/* segmented range control; Roboto to match the chart face, pill group
+	   with a single highlight */
 	.yac-ocache-range { display: inline-flex; padding: 2px; gap: 2px; background: #f0f0f1; border-radius: 8px; }
 	.yac-ocache-range-btn { border: 0; background: none; border-radius: 6px; padding: 5px 14px; font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 500; letter-spacing: .2px; color: #646970; cursor: pointer; transition: background .12s, color .12s, box-shadow .12s; }
 	.yac-ocache-range-btn:hover { color: #1d2327; }
