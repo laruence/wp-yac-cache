@@ -1,24 +1,3 @@
-/* Client-side trend chart for the Yac Object Cache health panel.
-   Terminal-mono look: smoothed 1.25px lines over a dashed grid, square
-   hover markers on a dotted crosshair.
-
-   Views are calendar-anchored, not "now minus N": 'today' spans local
-   midnight to the next midnight, 'yday' the previous calendar day,
-   'week' the last seven calendar days. The PHP side computes those
-   boundaries (it knows the site timezone) and ships them in
-   data.ranges, so a day line always starts at the left edge of the
-   plot instead of hanging off the right end of a week-long axis.
-   'today' and 'yday' read the 15-minute columns, 'week' the hourly
-   ones; both fall back to whatever resolution actually covers the
-   window, and buckets adapt so a view never plots more than ~24
-   vertices. A view with no samples inside it borrows the other
-   resolution rather than drawing nothing.
-
-   While 'today' is showing, each line ends in a dot that pulses once a
-   second: the counters are still moving. The left axis is fitted to the
-   observed hit rates so the rate line sits around two-thirds height;
-   the right axis tops out below the rate line's lowest point so the
-   volume lines can never climb over it. */
 ( function() {
 	'use strict';
 
@@ -27,6 +6,7 @@
 	if ( ! src || ! svg ) {
 		return;
 	}
+
 	var data;
 	try {
 		data = JSON.parse( src.textContent );
@@ -37,622 +17,589 @@
 		return;
 	}
 
-	var wrap  = svg.parentNode;
-	var tip   = wrap.querySelector( '.yac-ocache-chart-tip' );
+	var wrap = svg.parentNode;
+	var tip  = wrap.querySelector( '.yac-ocache-chart-tip' );
 	var cards = {};
-	document.querySelectorAll( '.yac-ocache-metric' ).forEach( function( c ) {
-		cards[ c.getAttribute( 'data-yac-series' ) || c.getAttribute( 'data-yac-stat' ) ] = c;
+	document.querySelectorAll( '.yac-ocache-metric[data-yac-series]' ).forEach( function( card ) {
+		cards[ card.getAttribute( 'data-yac-series' ) ] = card;
 	} );
+
+	var H = 190, PT = 16, PB = 22, PL = 30, PR = 40;
+	var COLORS = {
+		rate: '#198038', hits: '#3675b5', miss: '#b64f7b', kicks: '#6955a3',
+		recycles: '#c88f00', fails: '#a94a18'
+	};
+	var STATUS = {
+		healthy: { color: '#198038', tint: '#edf9ef', icon: '●', label: 'Healthy' },
+		warning: { color: '#9a6700', tint: '#fff8db', icon: '▲', label: 'Attention' },
+		critical: { color: '#da1e28', tint: '#fff1f1', icon: '◆', label: 'Critical' }
+	};
+	var CHROME = { text: '#6f6f6f', grid: '#e5e5e5', axis: '#a8a8a8', hover: '#6f6f6f', surface: '#fcfcfb' };
+	var LABELS = {
+		rate: 'Hit rate', hits: 'Hits', miss: 'Misses', kicks: 'Kicks',
+		recycles: 'Recycles', fails: 'Fails'
+	};
+	var FIELD  = { rate: 'rate', hits: 'h', miss: 'm', kicks: 'k', recycles: 'r', fails: 'f' };
+	var LINES  = [ 'hits', 'miss', 'kicks', 'rate' ];
+	var TIP_ORDER = [ 'rate', 'hits', 'miss', 'kicks' ];
+	var EVENTS = [ 'recycles', 'fails' ];
+	var VIEWS  = {
+		today: { src: 'min', step: 1800, live: true },
+		yday:  { src: 'min', step: 3600, live: false },
+		week:  { src: 'hr', step: 21600, live: false }
+	};
+	var state = {
+		view: 'today',
+		on: { hits: true, miss: true, kicks: true, recycles: true, fails: true },
+		pinnedIndex: null
+	};
+
+	function levelOf( rate ) {
+		return rate >= 0.9 ? 'healthy' : rate >= 0.7 ? 'warning' : 'critical';
+	}
 	function setCard( key, text ) {
 		if ( cards[ key ] ) {
 			cards[ key ].querySelector( '.yac-ocache-metric-val' ).textContent = text;
 		}
 	}
-	/* fails/recycles chips light up only when the window actually logged
-	   some, so a quiet cache reads as neutral and any churn catches the eye */
-	function setStat( key, n ) {
-		var card = cards[ key ];
+	function setRateCard( rate, enough ) {
+		var card = cards.rate;
 		if ( ! card ) {
 			return;
 		}
-		card.querySelector( '.yac-ocache-metric-val' ).textContent = fmtK( n );
-		card.classList.toggle( 'is-hot', n > 0 );
+		card.querySelector( '.yac-ocache-metric-val' ).textContent = enough ? ( rate * 100 ).toFixed( 1 ) + '%' : '—';
+		card.classList.remove( 'is-healthy', 'is-warning', 'is-critical', 'is-warmup' );
+		card.classList.add( enough ? 'is-' + levelOf( rate ) : 'is-warmup' );
 	}
-
-	var H = 190, PT = 16, PB = 22, PL = 30, PR = 40;
-	/* three hues far enough apart to tell 1.25px lines apart on white:
-	   green, blue, violet. Amber and red stay reserved for the rate line's
-	   own verdict levels so a warning never reads as the misses series.
-	   The rate line swaps its own colour per vertex once a bucket crosses
-	   the plugin's verdict thresholds (90 / 70) */
-	var COLORS = { rate: '#059669', hits: '#2563eb', miss: '#7c3aed' };
-	var LEVEL  = { g: '#059669', y: '#f59e0b', r: '#ef4444' };
-	var LABELS = { rate: 'Hit rate', hits: 'Hits', miss: 'Misses' };
-	var FIELD  = { rate: 'rate', hits: 'h', miss: 'm' };
-	var ORDER  = [ 'hits', 'miss', 'rate' ]; /* rate drawn last, on top */
-	/* read order for the hover tooltip: the headline metric first, then the
-	   volumes. Draw order stays separate so the rate line keeps painting on top */
-	var TIP    = [ 'rate', 'hits', 'miss' ];
-	/* fixed granularity per view: today one point per 15-minute sample,
-	   yesterday per hour, the week per 6 hours. The 'min' columns feed
-	   today and yesterday, the hourly ones feed the week */
-	var VIEWS  = {
-		today: { src: 'min', step: 900,   live: true },
-		yday:  { src: 'min', step: 3600,  live: false },
-		week:  { src: 'hr',  step: 21600, live: false }
-	};
-	/* all three series always draw; 'on' is kept so the hover/skip guards
-	   stay valid if toggling is ever reinstated */
-	var state = { view: 'today', on: { rate: true, hits: true, miss: true } };
-
-	function levelOf( r ) {
-		return r >= 0.9 ? 'g' : r >= 0.7 ? 'y' : 'r';
+	function fmtK( value ) {
+		if ( ! value || value < 0 ) {
+			return '0';
+		}
+		if ( value >= 1e6 ) {
+			return ( value / 1e6 ).toFixed( 1 ) + 'M';
+		}
+		if ( value >= 1e3 ) {
+			return ( value / 1e3 ).toFixed( 1 ) + 'K';
+		}
+		return String( Math.round( value ) );
+	}
+	function fmtInt( value ) {
+		return value.toLocaleString();
 	}
 
 	var NS = 'http://www.w3.org/2000/svg';
 	function mk( name, attrs, parent ) {
 		var node = document.createElementNS( NS, name );
-		for ( var k in attrs ) {
-			node.setAttribute( k, attrs[ k ] );
-		}
+		Object.keys( attrs ).forEach( function( key ) {
+			node.setAttribute( key, attrs[ key ] );
+		} );
 		( parent || svg ).appendChild( node );
 		return node;
 	}
-	function txt( x, y, str, attrs, parent ) {
-		var a = { x: x, y: y, 'font-size': 10, fill: '#a8a29e' };
-		for ( var k in ( attrs || {} ) ) {
-			a[ k ] = attrs[ k ];
-		}
-		var node = mk( 'text', a, parent );
-		node.textContent = str;
+	function txt( x, y, text, attrs, parent ) {
+		var node = mk( 'text', Object.assign( { x: x, y: y, 'font-size': 10, fill: CHROME.text }, attrs || {} ), parent );
+		node.textContent = text;
 		return node;
 	}
-	function fmtK( v ) {
-		if ( ! v || v < 0 ) {
-			return '0';
+	/* Monotone cubic Bezier controls keep the line fluid without overshooting
+	 * observed values. Flat segments zero both tangents; steep controls are
+	 * normalised before emitting the C commands. */
+	function bezPath( points ) {
+		if ( ! Array.isArray( points ) || ! points.length ) {
+			return '';
 		}
-		if ( v >= 1e6 ) {
-			return ( v / 1e6 ).toFixed( 1 ) + 'M';
-		}
-		if ( v >= 1e3 ) {
-			return ( v / 1e3 ).toFixed( 1 ) + 'K';
-		}
-		return String( Math.round( v ) );
-	}
-	function fmtInt( v ) {
-		return v.toLocaleString();
-	}
-
-	/* the set whose cumulative counters actually bracket [from, to):
-	   it needs a sample at or before 'from' to serve as the baseline.
-	   'hr' covers the whole week so it always qualifies; 'min' only does
-	   for the today view */
-	function pickCumulativeSource( from, to ) {
-		var cands = [ data.hr, data.min ];
-		for ( var i = 0; i < cands.length; i++ ) {
-			var s = cands[ i ];
-			if ( s && s.f && s.r && s.t && s.t.length && s.t[ 0 ] <= from && s.t[ s.t.length - 1 ] < to ) {
-				return s;
+		var safe = [];
+		for ( var i = 0; i < points.length; i++ ) {
+			var point = points[ i ];
+			if ( ! point || ! Number.isFinite( point[ 0 ] ) || ! Number.isFinite( point[ 1 ] ) ) {
+				return '';
+			}
+			var last = safe[ safe.length - 1 ];
+			if ( ! last || point[ 0 ] > last[ 0 ] ) {
+				safe.push( [ point[ 0 ], point[ 1 ] ] );
+			} else if ( point[ 0 ] === last[ 0 ] ) {
+				last[ 1 ] = point[ 1 ];
+			} else {
+				return '';
 			}
 		}
-		/* fall back to whichever set overlaps the window at all */
-		for ( var j = 0; j < cands.length; j++ ) {
-			var t = cands[ j ];
-			if ( t && t.f && t.r && t.t && t.t.length && t.t[ t.t.length - 1 ] >= from && t.t[ 0 ] < to ) {
-				return t;
+		var d = 'M' + safe[ 0 ][ 0 ].toFixed( 1 ) + ' ' + safe[ 0 ][ 1 ].toFixed( 1 );
+		if ( 1 === safe.length ) {
+			return d;
+		}
+		var slopes = [], tangents = [];
+		for ( i = 0; i < safe.length - 1; i++ ) {
+			slopes.push( ( safe[ i + 1 ][ 1 ] - safe[ i ][ 1 ] ) / ( safe[ i + 1 ][ 0 ] - safe[ i ][ 0 ] ) );
+		}
+		for ( i = 0; i < safe.length; i++ ) {
+			tangents.push( 0 === i ? slopes[ 0 ] : i === safe.length - 1 ? slopes[ slopes.length - 1 ] : ( slopes[ i - 1 ] + slopes[ i ] ) / 2 );
+		}
+		for ( i = 0; i < slopes.length; i++ ) {
+			if ( 0 === slopes[ i ] ) {
+				tangents[ i ] = 0;
+				tangents[ i + 1 ] = 0;
+				continue;
+			}
+			var a = tangents[ i ] / slopes[ i ], b = tangents[ i + 1 ] / slopes[ i ];
+			var magnitude = a * a + b * b;
+			if ( magnitude > 9 ) {
+				var scale = 3 / Math.sqrt( magnitude );
+				tangents[ i ] = scale * a * slopes[ i ];
+				tangents[ i + 1 ] = scale * b * slopes[ i ];
 			}
 		}
-		return null;
+		for ( i = 0; i < safe.length - 1; i++ ) {
+			var start = safe[ i ], end = safe[ i + 1 ], width = ( end[ 0 ] - start[ 0 ] ) / 3;
+			d += ' C' + ( start[ 0 ] + width ).toFixed( 1 ) + ' ' + ( start[ 1 ] + tangents[ i ] * width ).toFixed( 1 )
+				+ ' ' + ( end[ 0 ] - width ).toFixed( 1 ) + ' ' + ( end[ 1 ] - tangents[ i + 1 ] * width ).toFixed( 1 )
+				+ ' ' + end[ 0 ].toFixed( 1 ) + ' ' + end[ 1 ].toFixed( 1 );
+		}
+		return d;
 	}
 
-	/* window totals from a cumulative set: counters at the last sample
-	   before 'to', minus the baseline from the last bucket ending at or
-	   before 'from' (strict: a bucket starting exactly at 'from' carries
-	   its counter at the bucket end, already past the window start) */
-	function cumulativeWindow( set, from, to ) {
-		if ( ! set ) {
-			return null;
+	function addDelta( bucket, field, value ) {
+		/* Missing intervals are skipped; any observed delta remains additive.
+		 * A bucket with no observed delta at all stays unavailable. */
+		if ( null === value || undefined === value ) {
+			return;
 		}
-		var base = null, end = -1;
-		for ( var i = 0; i < set.t.length; i++ ) {
-			if ( set.t[ i ] < from ) {
-				base = i;
-			}
-		}
-		for ( var k = set.t.length - 1; k >= 0; k-- ) {
-			if ( set.t[ k ] < to ) {
-				end = k;
-				break;
-			}
-		}
-		if ( end < 0 ) {
-			return null;
-		}
-		if ( null === base ) {
-			/* window opens before any sample: the earliest counter is the
-			   best baseline we have */
-			base = 0;
-		}
-		if ( base > end ) {
-			base = end;
-		}
-		return { f: set.f[ end ] - set.f[ base ], r: set.r[ end ] - set.r[ base ] };
+		bucket[ field ] += value;
+		bucket[ field + 'Known' ] = true;
 	}
 
-	/* vertices for one view: [start, end) clipped to the samples that
-	   actually exist, bucketed at the view's fixed granularity */
-	function vertices( view ) {
-		var range = data.ranges[ view ] || data.ranges.today;
-		var from  = range[ 0 ];
-		var to    = range[ 1 ];
-		var cfg   = VIEWS[ view ] || VIEWS.today;
-
-		/* prefer the configured resolution, fall back to the other one
-		   when the view predates it (a young cache has no hourly data,
-		   a 7-day view outruns the 48h of minute data) */
+	function vertices( viewName ) {
+		var range = data.ranges[ viewName ] || data.ranges.today;
+		var from = range[ 0 ], to = range[ 1 ];
+		var cfg = VIEWS[ viewName ] || VIEWS.today;
 		var set = data[ cfg.src ];
+		var zeroFill = 'yday' === viewName || 'week' === viewName;
 		if ( ! set || ! set.t || ! set.t.length ) {
 			set = data[ 'min' === cfg.src ? 'hr' : 'min' ];
 		}
 		if ( ! set || ! set.t || ! set.t.length ) {
-			return null;
+			return { from: from, to: to, pts: [], live: false };
 		}
-
-		/* the window is empty for this resolution -> try the other */
-		var first = set.t[ 0 ];
-		var last  = set.t[ set.t.length - 1 ];
-		if ( last < from || first >= to ) {
+		if ( set.t[ set.t.length - 1 ] < from || set.t[ 0 ] >= to ) {
 			var alt = data[ 'min' === cfg.src ? 'hr' : 'min' ];
 			if ( alt && alt.t && alt.t.length && alt.t[ alt.t.length - 1 ] >= from && alt.t[ 0 ] < to ) {
 				set = alt;
+			} else if ( ! zeroFill ) {
+				return { from: from, to: to, pts: [], live: false };
 			} else {
-				return { from: from, to: to, pts: [], live: false, fails: 0, recycles: 0 };
+				set = { t: [], h: [], m: [], k: [], f: [], r: [] };
 			}
 		}
 
-		var span = to - from;
 		var step = cfg.step;
-		var thr  = data.minLookups * step / ( data.interval || 900 );
-
+		var threshold = data.minLookups * step / ( data.interval || 900 );
 		var buckets = [];
-		var cur     = null;
+		var byTime = {};
+		function makeBucket( time ) {
+			return {
+				t: time, h: 0, m: 0, k: 0, f: 0, r: 0, real: false,
+				kKnown: false, fKnown: false, rKnown: false
+			};
+		}
+		if ( zeroFill ) {
+			for ( var fill = from; fill < to; fill += step ) {
+				var initial = makeBucket( fill );
+				buckets.push( initial );
+				byTime[ fill ] = initial;
+			}
+		}
 		for ( var i = 0; i < set.t.length; i++ ) {
-			if ( set.t[ i ] < from ) {
+			if ( set.t[ i ] < from || set.t[ i ] >= to ) {
 				continue;
 			}
-			if ( set.t[ i ] >= to ) {
-				break;
+			var bucketTime = from + Math.floor( ( set.t[ i ] - from ) / step ) * step;
+			var bucket = byTime[ bucketTime ];
+			if ( ! bucket ) {
+				bucket = makeBucket( bucketTime );
+				buckets.push( bucket );
+				byTime[ bucketTime ] = bucket;
 			}
-			var b = Math.floor( set.t[ i ] / step ) * step;
-			if ( ! cur || cur.t !== b ) {
-				cur = { t: b, h: 0, m: 0 };
-				buckets.push( cur );
-			}
-			cur.h += set.h[ i ];
-			cur.m += set.m[ i ];
+			bucket.real = true;
+			bucket.h += set.h[ i ] || 0;
+			bucket.m += set.m[ i ] || 0;
+			addDelta( bucket, 'k', set.k ? set.k[ i ] : null );
+			addDelta( bucket, 'f', set.f ? set.f[ i ] : null );
+			addDelta( bucket, 'r', set.r ? set.r[ i ] : null );
 		}
+		buckets.sort( function( a, b ) { return a.t - b.t; } );
 
-		/* fails/recycles are cumulative, so a window's totals are the
-		   difference between the counters bracketing it. Use whichever
-		   set reaches back to the window start -- 'min' begins at
-		   yesterday midnight, so the yesterday view has no baseline in it
-		   and must borrow 'hr' (which spans the whole retained week) */
-		var f = 0, r = 0;
-		var cum = cumulativeWindow( pickCumulativeSource( from, to ), from, to );
-		if ( cum ) {
-			f = cum.f;
-			r = cum.r;
-		}
-
-		var pts = buckets.map( function( bk ) {
-			var look = bk.h + bk.m;
+		var pts = buckets.map( function( bucket ) {
+			var lookups = bucket.h + bucket.m;
 			return {
-				/* bucket start, not centre: the first vertex of the day
-				   then lands exactly on the midnight left edge */
-				t: bk.t,
-				rate: look >= thr ? bk.h / look : null,
-				h: look > 0 ? bk.h : null,
-				m: look > 0 ? bk.m : null
+				t: bucket.t,
+				rate: zeroFill && 0 === lookups ? 0 : ( lookups >= threshold ? bucket.h / lookups : null ),
+				h: zeroFill ? bucket.h : ( lookups > 0 ? bucket.h : null ),
+				m: zeroFill ? bucket.m : ( lookups > 0 ? bucket.m : null ),
+				k: bucket.kKnown ? bucket.k : null,
+				f: bucket.fKnown ? bucket.f : null,
+				r: bucket.rKnown ? bucket.r : null,
+				real: bucket.real
 			};
 		} );
-
-		/* only 'today' is still being written to, and only when the
-		   newest sample is in this window */
-		var live = !! cfg.live && set.t[ set.t.length - 1 ] >= from;
-
-		return { from: from, to: to, pts: pts, live: live, fails: f, recycles: r };
-	}
-
-	function mix( a, b, w ) {
-		return [ a[ 0 ] + ( b[ 0 ] - a[ 0 ] ) * w, a[ 1 ] + ( b[ 1 ] - a[ 1 ] ) * w ];
-	}
-
-	/* Catmull-Rom through the vertices as cubic Beziers: round turns,
-	   curve still passes every point so hover reads true values;
-	   control points clamp to the plot so spikes cannot overshoot.
-	   Returns one [p0, c1, c2, p1] tuple per pair of vertices, so a caller
-	   can recolour or split mid-segment without rebuilding the curve */
-	function beziers( px, top, bot ) {
-		var n = px.length, out = [];
-		if ( n < 2 ) {
-			return out;
-		}
-		if ( 2 === n ) {
-			/* straight run: control points on the line itself */
-			return [ [ px[ 0 ], mix( px[ 0 ], px[ 1 ], 1 / 3 ), mix( px[ 0 ], px[ 1 ], 2 / 3 ), px[ 1 ] ] ];
-		}
-		var clamp = function( v ) {
-			return Math.max( top - 1, Math.min( bot + 1, v ) );
+		return {
+			from: from, to: to, pts: pts, step: step,
+			live: !! cfg.live && set.t.length && set.t[ set.t.length - 1 ] >= from
 		};
-		for ( var i = 0; i < n - 1; i++ ) {
-			var p0 = px[ Math.max( 0, i - 1 ) ];
-			var p1 = px[ i ];
-			var p2 = px[ i + 1 ];
-			var p3 = px[ Math.min( n - 1, i + 2 ) ];
-			out.push( [
-				p1,
-				[ p1[ 0 ] + ( p2[ 0 ] - p0[ 0 ] ) / 6, clamp( p1[ 1 ] + ( p2[ 1 ] - p0[ 1 ] ) / 6 ) ],
-				[ p2[ 0 ] - ( p3[ 0 ] - p1[ 0 ] ) / 6, clamp( p2[ 1 ] - ( p3[ 1 ] - p1[ 1 ] ) / 6 ) ],
-				p2
-			] );
-		}
-		return out;
 	}
 
-	/* de Casteljau at t = 0.5: the two halves of one cubic */
-	function splitHalf( b ) {
-		var a = mix( b[ 0 ], b[ 1 ], 0.5 );
-		var m = mix( b[ 1 ], b[ 2 ], 0.5 );
-		var z = mix( b[ 2 ], b[ 3 ], 0.5 );
-		var am = mix( a, m, 0.5 );
-		var mz = mix( m, z, 0.5 );
-		var mid = mix( am, mz, 0.5 );
-		return [ [ b[ 0 ], a, am, mid ], [ mid, mz, z, b[ 3 ] ] ];
-	}
-
-	function bezPath( list ) {
-		if ( ! list.length ) {
-			return '';
-		}
-		var f = function( p ) {
-			return p[ 0 ].toFixed( 1 ) + ' ' + p[ 1 ].toFixed( 1 );
-		};
-		var d = 'M' + f( list[ 0 ][ 0 ] );
-		list.forEach( function( b ) {
-			d += ' C' + f( b[ 1 ] ) + ' ' + f( b[ 2 ] ) + ' ' + f( b[ 3 ] );
+	var chartView = null;
+	function drawLine( key, nodes ) {
+		var segments = [], segment = [];
+		nodes.forEach( function( node ) {
+			if ( node ) {
+				segment.push( node );
+			} else if ( segment.length ) {
+				segments.push( segment.splice( 0 ) );
+			}
 		} );
-		return d;
+		if ( segment.length ) {
+			segments.push( segment );
+		}
+		segments.forEach( function( run ) {
+			if ( 1 === run.length ) {
+				mk( 'circle', { cx: run[ 0 ].x, cy: run[ 0 ].y, r: 3.5, fill: COLORS[ key ], stroke: CHROME.surface, 'stroke-width': 1.5 } );
+				mk( 'circle', {
+					cx: run[ 0 ].x, cy: run[ 0 ].y, r: 9, fill: 'transparent',
+					'data-yac-line-hit': key
+				} );
+				return;
+			}
+			var path = bezPath( run.map( function( node ) { return [ node.x, node.y ]; } ) );
+			mk( 'path', {
+				d: path, fill: 'none', stroke: COLORS[ key ], 'stroke-width': 1.25,
+				'stroke-linejoin': 'round', 'stroke-linecap': 'round'
+			} );
+			mk( 'path', {
+				d: path, fill: 'none', stroke: 'transparent', 'stroke-width': 12,
+				'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+				'pointer-events': 'stroke', 'data-yac-line-hit': key
+			} );
+		} );
+		return segments.length ? segments[ segments.length - 1 ][ segments[ segments.length - 1 ].length - 1 ] : null;
 	}
-
-	var view = null;
 
 	function draw() {
-		var v = vertices( state.view );
-		if ( ! v ) {
-			return;
-		}
-		var pts = v.pts;
-		var W   = Math.max( 320, wrap.clientWidth );
-		svg.setAttribute( 'viewBox', '0 0 ' + W + ' ' + H );
-		svg.setAttribute( 'width', W );
-		svg.setAttribute( 'height', H );
-		while ( svg.firstChild ) {
-			svg.removeChild( svg.firstChild );
-		}
+		state.pinnedIndex = null;
 		if ( tip ) {
 			tip.hidden = true;
 		}
-
-		/* range totals for the one-line summary above the chart */
-		var sumH = 0, sumM = 0;
-		pts.forEach( function( p ) {
-			sumH += p.h || 0;
-			sumM += p.m || 0;
-		} );
-		setCard( 'rate', ( sumH + sumM ) >= data.minLookups ? ( 100 * sumH / ( sumH + sumM ) ).toFixed( 1 ) + '%' : '—' );
-		setCard( 'hits', fmtK( sumH ) );
-		setCard( 'miss', fmtK( sumM ) );
-		setStat( 'fails', v.fails );
-		setStat( 'recycles', v.recycles );
-
+		var chart = vertices( state.view );
+		var pts = chart.pts;
+		var W = Math.max( 320, wrap.clientWidth );
+		svg.setAttribute( 'viewBox', '0 0 ' + W + ' ' + H );
+		svg.setAttribute( 'width', W );
+		svg.setAttribute( 'height', H );
+		svg.setAttribute( 'tabindex', '0' );
+		while ( svg.firstChild ) {
+			svg.removeChild( svg.firstChild );
+		}
 		if ( ! pts.length ) {
-			view = null;
 			txt( W / 2, H / 2, 'no lookups in this range', { 'text-anchor': 'middle' } );
+			chartView = null;
 			return;
 		}
 
-		var plotH = H - PT - PB;
-		var bot   = PT + plotH;
-		var xL    = PL + 6;
-		var xR    = W - PR - 6;
-		var span  = v.to - v.from;
-		var x = function( t ) {
-			return +( xL + ( t - v.from ) / span * ( xR - xL ) ).toFixed( 1 );
-		};
-
-		/* left axis fits the observed rates and is shifted so the median
-		   lands two thirds of the way up the plot -- the rate line rides
-		   the upper middle instead of gluing to the ceiling or the floor */
-		var rates = [];
-		pts.forEach( function( p ) {
-			if ( null !== p.rate ) {
-				rates.push( p.rate );
-			}
+		var sumH = 0, sumM = 0, known = { k: false, f: false, r: false }, sums = { k: 0, f: 0, r: 0 };
+		pts.forEach( function( point ) {
+			sumH += point.h || 0;
+			sumM += point.m || 0;
+			[ 'k', 'f', 'r' ].forEach( function( field ) {
+				if ( null !== point[ field ] && undefined !== point[ field ] ) {
+					known[ field ] = true;
+					sums[ field ] += point[ field ];
+				}
+			} );
 		} );
-		var lo = 0.9, hi = 1, med = 0.95;
-		if ( rates.length ) {
-			rates.sort( function( a, b ) { return a - b; } );
-			lo  = rates[ 0 ];
-			hi  = rates[ rates.length - 1 ];
-			med = rates[ Math.floor( rates.length / 2 ) ];
+		var lookups = sumH + sumM;
+		var averageRate = lookups >= data.minLookups ? sumH / lookups : null;
+		setRateCard( averageRate, null !== averageRate );
+		setCard( 'hits', fmtK( sumH ) );
+		setCard( 'miss', fmtK( sumM ) );
+		setCard( 'kicks', known.k ? fmtK( sums.k ) : '—' );
+		setCard( 'fails', known.f ? fmtK( sums.f ) : '—' );
+		setCard( 'recycles', known.r ? fmtK( sums.r ) : '—' );
+
+		var plotH = H - PT - PB, bot = PT + plotH, xL = PL + 6, xR = W - PR - 6;
+		var separatorY = PT + plotH * 0.5;
+		var rateTop = PT, rateBottom = separatorY, rateH = rateBottom - rateTop;
+		var countTop = separatorY, countH = bot - countTop;
+		var span = chart.to - chart.from;
+		var x = function( time ) { return +( xL + ( time - chart.from ) / span * ( xR - xL ) ).toFixed( 1 ); };
+		var rates = pts.filter( function( point ) { return point.real && null !== point.rate; } ).map( function( point ) { return point.rate; } );
+		if ( null !== averageRate ) {
+			rates.push( averageRate );
 		}
-		var w = Math.max( 0.04, ( hi - lo ) * 1.6 );
-		/* median two thirds up => floor sits a third of a band below it */
-		var floor = med - w / 3;
+		var lo = rates.length ? Math.min.apply( null, rates ) : 0.9;
+		var hi = rates.length ? Math.max.apply( null, rates ) : 1;
+		/* Keep the two scales close without allowing them to cross. */
+		var band = Math.max( 0.04, ( hi - lo ) * 1.25 );
+		var floor = lo - band * 0.1;
 		if ( floor < 0 ) {
 			floor = 0;
 		}
-		if ( floor + w > 1 ) {
-			floor = 1 - w;
+		if ( floor + band > 1 ) {
+			floor = Math.max( 0, 1 - band );
 		}
-		var ceil = floor + w;
-		var yRate = function( r ) {
-			var c = Math.max( floor, Math.min( ceil, r ) );
-			return +( bot - plotH * ( c - floor ) / w ).toFixed( 1 );
+		var yRate = function( value ) {
+			var clamped = Math.max( floor, Math.min( floor + band, value ) );
+			return +( rateBottom - rateH * ( clamped - floor ) / band ).toFixed( 1 );
 		};
-
 		var peak = 1;
-		pts.forEach( function( p ) {
-			peak = Math.max( peak, p.h || 0, p.m || 0 );
+		pts.forEach( function( point ) {
+			if ( state.on.hits ) { peak = Math.max( peak, point.h || 0 ); }
+			if ( state.on.miss ) { peak = Math.max( peak, point.m || 0 ); }
+			if ( state.on.kicks ) { peak = Math.max( peak, point.k || 0 ); }
 		} );
-		/* the volume axis tops out where the rate line dips lowest, so
-		   hits/misses never climb above the rate curve */
-		var rateLow = null;
-		pts.forEach( function( p ) {
-			if ( null !== p.rate ) {
-				rateLow = Math.max( rateLow === null ? 0 : rateLow, yRate( p.rate ) );
-			}
-		} );
-		var avail = null === rateLow ? plotH : Math.max( plotH * 0.25, Math.min( plotH, bot - rateLow - 10 ) );
-		var top   = plotH * peak / avail;
-		var yCnt = function( val ) {
-			return +( bot - plotH * val / top ).toFixed( 1 );
-		};
-		var yOf = { rate: yRate, hits: yCnt, miss: yCnt };
+		var yCount = function( value ) { return +( bot - countH * value / peak ).toFixed( 1 ); };
+		var yOf = { rate: yRate, hits: yCount, miss: yCount, kicks: yCount };
 
-		/* shared gridlines: rate ticks left, volume values right */
-		[ 0, 0.5, 1 ].forEach( function( f ) {
-			var y = +( bot - plotH * f ).toFixed( 1 );
-			if ( f > 0 ) {
-				mk( 'line', { x1: PL, y1: y, x2: W - PR, y2: y, stroke: '#e7e5e4', 'stroke-width': 1, 'stroke-dasharray': '1 3' } );
+		[ 0, 0.5, 1 ].forEach( function( fraction ) {
+			var rateY = +( rateBottom - rateH * fraction ).toFixed( 1 );
+			var countY = +( bot - countH * fraction ).toFixed( 1 );
+			if ( fraction > 0 ) {
+				mk( 'line', { x1: PL, y1: rateY, x2: W - PR, y2: rateY, stroke: CHROME.grid, 'stroke-width': 1 } );
 			}
-			txt( PL - 4, y + 3, String( Math.round( ( floor + w * f ) * 100 ) ), { 'text-anchor': 'end' } );
-			txt( W - PR + 4, y + 3, fmtK( top * f ), { 'text-anchor': 'start' } );
+			if ( fraction < 1 ) {
+				mk( 'line', { x1: PL, y1: countY, x2: W - PR, y2: countY, stroke: CHROME.grid, 'stroke-width': 1 } );
+			}
+			txt( PL - 4, rateY + 3, String( Math.round( ( floor + band * fraction ) * 100 ) ), { 'text-anchor': 'end' } );
+			txt( W - PR + 4, countY + 3, fmtK( peak * fraction ), { 'text-anchor': 'start' } );
 		} );
-		mk( 'line', { x1: PL, y1: bot, x2: W - PR, y2: bot, stroke: '#d6d3d1', 'stroke-width': 1 } );
+		mk( 'line', { x1: PL, y1: separatorY, x2: W - PR, y2: separatorY, stroke: CHROME.grid, 'stroke-width': 1 } );
+		mk( 'line', { x1: PL, y1: bot, x2: W - PR, y2: bot, stroke: CHROME.axis, 'stroke-width': 1 } );
+		var averageBadge = null;
+		if ( null !== averageRate ) {
+			var averageY = yRate( averageRate );
+			var averageStatus = STATUS[ levelOf( averageRate ) ];
+			mk( 'line', {
+				x1: xL, y1: averageY, x2: xR, y2: averageY,
+				stroke: averageStatus.color, 'stroke-width': 1,
+				'stroke-dasharray': '4 4', opacity: 0.55
+			} );
+			averageBadge = { y: averageY, status: averageStatus, rate: averageRate };
+		}
 
-		/* clock-aligned ticks: hours within one day, days across the week */
-		var singleDay = span <= 86400;
-		var tickStep  = singleDay ? 6 * 3600 : 86400;
-		var d0 = new Date( v.from * 1000 );
+		var singleDay = span <= 86400, tickStep = singleDay ? 6 * 3600 : 86400;
+		var tick = new Date( chart.from * 1000 );
 		if ( singleDay ) {
-			d0.setMinutes( 0, 0, 0 );
-			while ( d0.getHours() % 6 !== 0 ) {
-				d0.setTime( d0.getTime() + 3600000 );
-			}
+			tick.setMinutes( 0, 0, 0 );
+			while ( tick.getHours() % 6 !== 0 ) { tick.setTime( tick.getTime() + 3600000 ); }
 		} else {
-			d0.setHours( 0, 0, 0, 0 );
-			if ( d0.getTime() / 1000 < v.from ) {
-				d0.setDate( d0.getDate() + 1 );
-			}
+			tick.setHours( 0, 0, 0, 0 );
+			if ( tick.getTime() / 1000 < chart.from ) { tick.setDate( tick.getDate() + 1 ); }
 		}
-		for ( var g = 0; g < 12 && d0.getTime() / 1000 <= v.to; g++ ) {
-			var tk = d0.getTime() / 1000;
-			txt( x( tk ), H - 7, singleDay
-				? d0.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', hour12: false } )
-				: d0.toLocaleDateString( [], { month: 'numeric', day: 'numeric' } ), { 'text-anchor': 'middle' } );
-			d0.setTime( d0.getTime() + tickStep * 1000 );
+		for ( var t = 0; t < 12 && tick.getTime() / 1000 <= chart.to; t++ ) {
+			txt( x( tick.getTime() / 1000 ), H - 7, singleDay
+				? tick.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', hour12: false } )
+				: tick.toLocaleDateString( [], { month: 'numeric', day: 'numeric' } ), { 'text-anchor': 'middle' } );
+			tick.setTime( tick.getTime() + tickStep * 1000 );
 		}
 
-		/* one series as plot-space nodes. A bucket with too few lookups
-		   reads null; interior nulls are bridged by linear interpolation
-		   between the bracketing samples so the line stays continuous
-		   (the bridge's centre is the average of its two ends). Only
-		   leading/trailing nulls -- a window edge with no data either side
-		   of it -- stay open. */
-		function seriesNodes( key ) {
-			var vals = pts.map( function( p ) {
-				var raw = p[ FIELD[ key ] ];
-				return ( null === raw || undefined === raw ) ? null : raw;
-			} );
-			var i = 0;
-			while ( i < vals.length ) {
-				if ( null !== vals[ i ] ) {
-					i++;
-					continue;
-				}
-				var j = i;
-				while ( j < vals.length && null === vals[ j ] ) {
-					j++;
-				}
-				if ( i > 0 && j < vals.length ) {
-					var a = vals[ i - 1 ], b = vals[ j ];
-					for ( var k = i; k < j; k++ ) {
-						vals[ k ] = a + ( b - a ) * ( k - ( i - 1 ) ) / ( j - ( i - 1 ) );
-					}
-				}
-				i = j;
-			}
-			var nodes = [];
-			pts.forEach( function( p, idx ) {
-				if ( null === vals[ idx ] ) {
-					return;
-				}
-				nodes.push( {
-					x: x( p.t ),
-					y: 'rate' === key ? yRate( vals[ idx ] ) : yCnt( vals[ idx ] ),
-					lv: 'rate' === key ? levelOf( vals[ idx ] ) : null
-				} );
-			} );
-			return nodes;
-		}
-
-		/* smoothed series lines; a lone vertex draws as a square dot. The
-		   rate line changes colour at the *midpoint* of any segment whose
-		   two ends sit at different verdicts, so a bucket that drops into
-		   warning/unhealthy territory tints half the run-in and half the
-		   run-out rather than snapping the whole segment */
 		var ends = {};
-		ORDER.forEach( function( key ) {
+		LINES.forEach( function( key ) {
+			if ( 'rate' !== key && ! state.on[ key ] ) {
+				return;
+			}
+			var nodes = pts.map( function( point ) {
+				var value = point[ FIELD[ key ] ];
+				return null === value || undefined === value ? null : { x: x( point.t ), y: yOf[ key ]( value ) };
+			} );
+			var last = drawLine( key, nodes );
+			if ( last ) {
+				ends[ key ] = last;
+			}
+		} );
+
+		var eventLanes = { recycles: bot - countH * 0.22, fails: bot - countH * 0.45 };
+		EVENTS.forEach( function( key ) {
 			if ( ! state.on[ key ] ) {
 				return;
 			}
-			var nodes = seriesNodes( key );
-			if ( ! nodes.length ) {
-				return;
-			}
-			var coords = nodes.map( function( n ) {
-				return [ n.x, n.y ];
+			pts.forEach( function( point ) {
+				var value = point[ FIELD[ key ] ];
+				if ( null === value || undefined === value || value <= 0 ) {
+					return;
+				}
+				var cx = x( point.t ), cy = eventLanes[ key ];
+				if ( 'fails' === key ) {
+					mk( 'polygon', { points: cx + ',' + ( cy - 4.5 ) + ' ' + ( cx + 4.5 ) + ',' + cy + ' ' + cx + ',' + ( cy + 4.5 ) + ' ' + ( cx - 4.5 ) + ',' + cy, fill: COLORS[ key ], stroke: CHROME.surface, 'stroke-width': 1.5 } );
+				} else {
+					mk( 'circle', { cx: cx, cy: cy, r: 3.5, fill: COLORS[ key ], stroke: CHROME.surface, 'stroke-width': 1.5 } );
+				}
 			} );
-
-			if ( 1 === nodes.length ) {
-				mk( 'rect', {
-					x: nodes[ 0 ].x - 2, y: nodes[ 0 ].y - 2, width: 4, height: 4,
-					fill: 'rate' === key ? LEVEL[ nodes[ 0 ].lv ] : COLORS[ key ]
-				} );
-			} else if ( 'rate' === key ) {
-				beziers( coords, PT, bot ).forEach( function( b, s ) {
-					var lvA = nodes[ s ].lv, lvB = nodes[ s + 1 ].lv;
-					var stroke = function( d, lv ) {
-						mk( 'path', {
-							d: d, fill: 'none', stroke: LEVEL[ lv ], 'stroke-width': 1.25,
-							'stroke-linejoin': 'round', 'stroke-linecap': 'round'
-						} );
-					};
-					if ( lvA === lvB ) {
-						stroke( bezPath( [ b ] ), lvA );
-					} else {
-						var halves = splitHalf( b );
-						stroke( bezPath( [ halves[ 0 ] ] ), lvA );
-						stroke( bezPath( [ halves[ 1 ] ] ), lvB );
-					}
-				} );
-			} else {
-				mk( 'path', {
-					d: bezPath( beziers( coords, PT, bot ) ),
-					fill: 'none', stroke: COLORS[ key ], 'stroke-width': 1.25,
-					'stroke-linejoin': 'round', 'stroke-linecap': 'round'
-				} );
-			}
-
-			var lastN = nodes[ nodes.length - 1 ];
-			ends[ key ] = { p: [ lastN.x, lastN.y ], color: 'rate' === key ? LEVEL[ lastN.lv ] : COLORS[ key ] };
 		} );
 
-		/* 'today' is still counting: pulse a dot at each line's end */
-		if ( v.live ) {
+		if ( chart.live ) {
 			var defs = mk( 'defs', {} );
-			var st = document.createElementNS( NS, 'style' );
-			st.textContent = '@keyframes yac-ocache-pulse{0%,100%{opacity:1}50%{opacity:.15}}' +
+			var pulseStyle = document.createElementNS( NS, 'style' );
+			pulseStyle.textContent = '@keyframes yac-ocache-pulse{0%,100%{opacity:1}50%{opacity:.18}}' +
 				'.yac-ocache-live{animation:yac-ocache-pulse 1s ease-in-out infinite}';
-			defs.appendChild( st );
+			defs.appendChild( pulseStyle );
 			Object.keys( ends ).forEach( function( key ) {
 				mk( 'circle', {
-					cx: ends[ key ].p[ 0 ],
-					cy: ends[ key ].p[ 1 ],
-					r: 2.5,
-					fill: ends[ key ].color,
+					cx: ends[ key ].x, cy: ends[ key ].y, r: 3.5,
+					fill: COLORS[ key ], stroke: CHROME.surface, 'stroke-width': 1.5,
 					'class': 'yac-ocache-live'
 				} );
 			} );
 		}
 
-		/* hover crosshair */
-		var hover = mk( 'g', { style: 'display:none' } );
-		var vline = mk( 'line', { y1: PT, y2: bot, stroke: '#a8a29e', 'stroke-width': 1, 'stroke-dasharray': '2 3' }, hover );
-		var dots  = {};
-		ORDER.forEach( function( key ) {
-			dots[ key ] = mk( 'rect', { width: 6, height: 6, fill: COLORS[ key ], stroke: '#fff', 'stroke-width': 1.5 }, hover );
+		var hover = mk( 'g', { style: 'display:none', 'pointer-events': 'none' } );
+		var vline = mk( 'line', { y1: PT, y2: bot, stroke: CHROME.hover, 'stroke-width': 1, 'stroke-dasharray': '2 3' }, hover );
+		var dots = {};
+		LINES.forEach( function( key ) {
+			dots[ key ] = mk( 'circle', { r: 3.5, fill: COLORS[ key ], stroke: CHROME.surface, 'stroke-width': 1.5 }, hover );
 		} );
-		mk( 'rect', { x: 0, y: 0, width: W, height: H, fill: 'transparent' } );
+		mk( 'rect', { x: 0, y: 0, width: W, height: H, fill: 'transparent', 'pointer-events': 'none' } );
 
-		view = { pts: pts, x: x, yOf: yOf, hover: hover, vline: vline, dots: dots, W: W };
+		if ( averageBadge ) {
+			var averageStatus = averageBadge.status;
+			var badge = mk( 'g', { 'aria-hidden': 'true', 'pointer-events': 'none' } );
+			var badgeHeight = 17;
+			var badgeTop = averageBadge.y - badgeHeight / 2;
+			var badgeText = txt(
+				0,
+				averageBadge.y + 3.5,
+				averageStatus.icon + ' ' + averageStatus.label + ' · ' + ( averageBadge.rate * 100 ).toFixed( 1 ) + '%',
+				{ style: 'fill:' + averageStatus.color, 'font-weight': 500 },
+				badge
+			);
+			var badgeWidth = Math.ceil( badgeText.getComputedTextLength() ) + 12;
+			var badgeX = Math.max( xL, xR - badgeWidth );
+			badgeText.setAttribute( 'x', badgeX + 6 );
+			var badgeBack = mk( 'rect', {
+				x: badgeX, y: badgeTop, width: badgeWidth, height: badgeHeight,
+				rx: 3, fill: averageStatus.tint, stroke: averageStatus.color,
+				'stroke-width': 0.75
+			}, badge );
+			badge.insertBefore( badgeBack, badgeText );
+		}
+		chartView = { pts: pts, x: x, yOf: yOf, hover: hover, vline: vline, dots: dots, W: W, step: chart.step, to: chart.to };
 	}
 
-	function onMove( ev ) {
-		if ( ! view || ! tip ) {
-			return;
+	function pointIndex( event ) {
+		if ( ! chartView ) {
+			return null;
 		}
-		var rect  = svg.getBoundingClientRect();
-		var scale = rect.width / view.W;
-		var vx    = ( ev.clientX - rect.left ) / scale;
-		var best = 0, bestD = Infinity;
-		view.pts.forEach( function( p, i ) {
-			var d = Math.abs( view.x( p.t ) - vx );
-			if ( d < bestD ) {
-				bestD = d;
-				best = i;
+		var rect = svg.getBoundingClientRect();
+		var px = ( event.clientX - rect.left ) / ( rect.width / chartView.W );
+		var best = 0, distance = Infinity;
+		chartView.pts.forEach( function( point, index ) {
+			var next = Math.abs( chartView.x( point.t ) - px );
+			if ( next < distance ) {
+				distance = next;
+				best = index;
 			}
 		} );
-		var p  = view.pts[ best ];
-		var px = view.x( p.t );
-		view.hover.style.display = '';
-		view.vline.setAttribute( 'x1', px );
-		view.vline.setAttribute( 'x2', px );
-
-		var when = new Date( p.t * 1000 );
-		var head = when.toLocaleDateString( [], { month: 'short', day: 'numeric' } ) + ' ' +
-			when.toLocaleTimeString( [], { hour: '2-digit', minute: '2-digit', hour12: false } );
+		return best;
+	}
+	function showPoint( index, event ) {
+		if ( null === index || ! chartView || ! tip ) {
+			return;
+		}
+		var point = chartView.pts[ index ], px = chartView.x( point.t );
+		chartView.hover.style.display = '';
+		chartView.vline.setAttribute( 'x1', px );
+		chartView.vline.setAttribute( 'x2', px );
+		var date = new Date( point.t * 1000 );
+		var end = new Date( Math.min( point.t + chartView.step, chartView.to ) * 1000 );
+		var dateLabel = date.toLocaleDateString( [], { month: 'short', day: 'numeric' } );
+		var timeFormat = { hour: '2-digit', minute: '2-digit', hour12: false };
+		var head = dateLabel + ' ' + date.toLocaleTimeString( [], timeFormat ) + '–' + end.toLocaleTimeString( [], timeFormat );
 		var rows = '';
-		TIP.forEach( function( key ) {
-			var val = p[ FIELD[ key ] ];
-			var show = state.on[ key ] && null !== val;
-			view.dots[ key ].style.display = show ? '' : 'none';
+		TIP_ORDER.forEach( function( key ) {
+			var value = point[ FIELD[ key ] ];
+			var visible = 'rate' === key || state.on[ key ];
+			var show = visible && null !== value && undefined !== value;
+			chartView.dots[ key ].style.display = show ? '' : 'none';
 			if ( show ) {
-				var cy = view.yOf[ key ]( val );
-				var color = 'rate' === key ? LEVEL[ levelOf( val ) ] : COLORS[ key ];
-				view.dots[ key ].setAttribute( 'fill', color );
-				view.dots[ key ].setAttribute( 'x', px - 3 );
-				view.dots[ key ].setAttribute( 'y', cy - 3 );
-				rows += '<div class="row"><i style="background:' + color + '"></i>' + LABELS[ key ] +
-					'<b>' + ( 'rate' === key ? ( val * 100 ).toFixed( 1 ) + '%' : fmtInt( val ) ) + '</b></div>';
+				var y = chartView.yOf[ key ]( value );
+				chartView.dots[ key ].setAttribute( 'cx', px );
+				chartView.dots[ key ].setAttribute( 'cy', y );
+				rows += '<div class="row"><i style="background:' + COLORS[ key ] + '"></i>' + LABELS[ key ] + '<b>' + ( 'rate' === key ? ( value * 100 ).toFixed( 1 ) + '%' : fmtInt( value ) ) + '</b></div>';
+			}
+		} );
+		EVENTS.forEach( function( key ) {
+			var value = point[ FIELD[ key ] ];
+			if ( state.on[ key ] && null !== value && undefined !== value && value > 0 ) {
+				rows += '<div class="row"><i style="background:' + COLORS[ key ] + '"></i>' + LABELS[ key ] + '<b>' + fmtInt( value ) + '</b></div>';
 			}
 		} );
 		tip.innerHTML = '<div class="d">' + head + '</div>' + rows;
 		tip.hidden = false;
-
-		var wrapRect = wrap.getBoundingClientRect();
-		var left = ( rect.left - wrapRect.left ) + px * scale + 16;
+		var chartRect = svg.getBoundingClientRect(), wrapRect = wrap.getBoundingClientRect();
+		var left = chartRect.left - wrapRect.left + px * ( chartRect.width / chartView.W ) + 16;
 		if ( left + tip.offsetWidth > wrapRect.width - 4 ) {
-			left = ( rect.left - wrapRect.left ) + px * scale - tip.offsetWidth - 16;
+			left = chartRect.left - wrapRect.left + px * ( chartRect.width / chartView.W ) - tip.offsetWidth - 16;
 		}
 		tip.style.left = Math.max( 4, left ) + 'px';
-		tip.style.top = Math.max( 4, Math.min( ev.clientY - wrapRect.top - tip.offsetHeight / 2, wrapRect.height - tip.offsetHeight - 4 ) ) + 'px';
+		tip.style.top = Math.max( 4, Math.min( event.clientY - wrapRect.top - tip.offsetHeight / 2, wrapRect.height - tip.offsetHeight - 4 ) ) + 'px';
 	}
-	function onLeave() {
-		if ( view ) {
-			view.hover.style.display = 'none';
+	function hidePoint() {
+		if ( chartView ) {
+			chartView.hover.style.display = 'none';
 		}
 		if ( tip ) {
 			tip.hidden = true;
 		}
 	}
-	svg.addEventListener( 'mousemove', onMove );
-	svg.addEventListener( 'mouseleave', onLeave );
 
-	document.querySelectorAll( '[data-yac-range]' ).forEach( function( btn ) {
-		btn.classList.toggle( 'is-active', btn.getAttribute( 'data-yac-range' ) === state.view );
-		btn.setAttribute( 'aria-pressed', btn.getAttribute( 'data-yac-range' ) === state.view ? 'true' : 'false' );
-		btn.addEventListener( 'click', function() {
-			var next = btn.getAttribute( 'data-yac-range' );
-			if ( ! data.ranges[ next ] || next === state.view ) {
+	svg.addEventListener( 'pointermove', function( event ) {
+		if ( 'mouse' !== event.pointerType ) {
+			return;
+		}
+		var index = pointIndex( event );
+		showPoint( index, event );
+		if ( null !== state.pinnedIndex ) {
+			state.pinnedIndex = index;
+		}
+	} );
+	svg.addEventListener( 'pointerleave', function() {
+		if ( null === state.pinnedIndex ) {
+			hidePoint();
+		}
+	} );
+	svg.addEventListener( 'click', function( event ) {
+		var lineHit = event.target.closest && event.target.closest( '[data-yac-line-hit]' );
+		if ( ! lineHit ) {
+			state.pinnedIndex = null;
+			hidePoint();
+			return;
+		}
+		state.pinnedIndex = pointIndex( event );
+		showPoint( state.pinnedIndex, event );
+	} );
+	svg.addEventListener( 'keydown', function( event ) {
+		if ( 'Escape' === event.key ) {
+			state.pinnedIndex = null;
+			hidePoint();
+		}
+	} );
+
+	document.querySelectorAll( '.yac-ocache-metric[aria-pressed]' ).forEach( function( card ) {
+		var key = card.getAttribute( 'data-yac-series' );
+		card.addEventListener( 'click', function() {
+			state.on[ key ] = ! state.on[ key ];
+			card.classList.toggle( 'is-selected', state.on[ key ] );
+			card.setAttribute( 'aria-pressed', state.on[ key ] ? 'true' : 'false' );
+			draw();
+		} );
+	} );
+	document.querySelectorAll( '[data-yac-range]' ).forEach( function( button ) {
+		button.addEventListener( 'click', function() {
+			var next = button.getAttribute( 'data-yac-range' );
+			if ( next === state.view || ! data.ranges[ next ] ) {
 				return;
 			}
 			state.view = next;
-			document.querySelectorAll( '[data-yac-range]' ).forEach( function( b ) {
-				var on = b === btn;
-				b.classList.toggle( 'is-active', on );
-				b.setAttribute( 'aria-pressed', on ? 'true' : 'false' );
+			document.querySelectorAll( '[data-yac-range]' ).forEach( function( item ) {
+				var active = item === button;
+				item.classList.toggle( 'is-active', active );
+				item.setAttribute( 'aria-pressed', active ? 'true' : 'false' );
 			} );
 			draw();
 		} );
@@ -663,6 +610,5 @@
 		cancelAnimationFrame( raf );
 		raf = requestAnimationFrame( draw );
 	} );
-
 	draw();
 } )();

@@ -1,7 +1,7 @@
 	.yac-ocache-wrap { max-width: 1100px; margin-top: 12px; }
 	.yac-ocache-grid { display: flex; gap: 14px; flex-wrap: wrap; }
 	.yac-ocache-panel { background: #fff; border: 1px solid #dcdcde; border-radius: 8px; padding: 18px 20px; box-shadow: 0 1px 1px rgba(0, 0, 0, .04); }
-	.yac-ocache-wrap h2 { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; }
+	.yac-ocache-wrap h2 { font-family: inherit; }
 	.yac-ocache-panel-note { color: #646970; font-size: 12px; margin: -4px 0 12px; }
 	.yac-ocache-donut-track { fill: none; stroke: #f0f0f1; stroke-width: 13; }
 	.yac-ocache-donut-fill { fill: none; stroke-width: 13; stroke-linecap: round; }
@@ -20,6 +20,7 @@
 	.yac-ocache-op-list { list-style: none; margin: 8px 0 0; padding: 0; }
 	.yac-ocache-op-list li { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #f0f0f1; font-size: 13px; }
 	.yac-ocache-op-list span { color: #646970; }
+	.yac-ocache-op-list small { color: #8c8f94; font-weight: 400; font-size: 12px; white-space: nowrap; }
 	.yac-ocache-entry-bars { list-style: none; margin: 8px 0 0; padding: 0; }
 	.yac-ocache-entry-bars li { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
 	.yac-ocache-entry-key { width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #50575e; flex: none; font-family: Consolas, Monaco, monospace; }
@@ -65,45 +66,59 @@
 	.yac-ocache-entry-list.is-hidden { display: none; }
 	.yac-ocache-entry-bars .yac-ocache-entry-caption { color: #646970; font-size: 12px; padding-bottom: 2px; }
 	.yac-ocache-note { color: #646970; font-size: 12px; margin-top: 8px; }
-	/* metrics on the left, range control on the right, one row */
 	.yac-ocache-health-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 	.yac-ocache-windows { display: flex; flex-direction: column; gap: 12px; }
-	/* segmented range control; Roboto to match the chart face, pill group
-	   with a single highlight */
-	.yac-ocache-range { display: inline-flex; padding: 2px; gap: 2px; background: #f0f0f1; border-radius: 8px; }
-	.yac-ocache-range-btn { border: 0; background: none; border-radius: 6px; padding: 5px 14px; font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 500; letter-spacing: .2px; color: #646970; cursor: pointer; transition: background .12s, color .12s, box-shadow .12s; }
-	.yac-ocache-range-btn:hover { color: #1d2327; }
-	.yac-ocache-range-btn:focus-visible { outline: 2px solid #2271b1; outline-offset: 1px; }
-	.yac-ocache-range-btn.is-active { background: #fff; color: #1d2327; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); }
-	/* one static summary line above the chart: series totals plus the
-	   window's fails/recycles. Not clickable, so no pointer affordance */
-	.yac-ocache-metrics { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
-	.yac-ocache-metric { display: inline-flex; align-items: baseline; gap: 6px; color: #a8a29e; }
-	/* label stays a plain inline box so its baseline is the text baseline;
-	   the colour swatch is absolutely positioned out of flow -- an in-flow
-	   empty bar would otherwise become the flex baseline and lift the label
-	   off the value's baseline */
-	.yac-ocache-metric-label { position: relative; font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 11px; font-weight: 400; letter-spacing: .2px; }
-	.yac-ocache-metric[data-yac-series] .yac-ocache-metric-label { padding-left: 15px; }
-	.yac-ocache-metric[data-yac-series] .yac-ocache-metric-label::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 11px; height: 2px; border-radius: 1px; background: currentColor; }
-	.yac-ocache-metric-val { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; font-size: 12px; font-weight: 400; font-variant-numeric: tabular-nums; }
-	.yac-ocache-metric[data-yac-series="rate"] { color: #059669; }
-	.yac-ocache-metric[data-yac-series="hits"] { color: #2563eb; }
-	.yac-ocache-metric[data-yac-series="miss"] { color: #7c3aed; }
-	/* fails/recycles have no line of their own: a neutral chip so they read
-	   as counters, turning amber when the window actually logged some */
-	.yac-ocache-metric-stat { padding: 3px 11px; border-radius: 12px; background: #f5f5f4; border: 1px solid #e7e5e4; color: #57534e; }
-	.yac-ocache-metric-stat .yac-ocache-metric-val { font-weight: 600; }
-	.yac-ocache-metric-stat:last-child { margin-right: 0; }
-	.yac-ocache-metric-stat.is-hot { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
-	.yac-ocache-metric-stat.is-hot .yac-ocache-metric-val { color: #b45309; }
-	.yac-ocache-chart-wrap { position: relative; }
+	.yac-ocache-health-top, .yac-ocache-windows { font-family: inherit; }
+	.yac-ocache-panel {
+		--yac-chart-surface: #fcfcfb;
+		--yac-chart-subtle: #f4f4f4;
+		--yac-chart-border: #c6c6c6;
+		--yac-chart-grid: #e5e5e5;
+		--yac-chart-axis: #a8a8a8;
+		--yac-chart-ink: #161616;
+		--yac-chart-muted: #6f6f6f;
+		--yac-rate: #198038;
+		--yac-hits: #3675b5;
+		--yac-miss: #b64f7b;
+		--yac-kicks: #6955a3;
+		--yac-recycles: #c88f00;
+		--yac-fails: #a94a18;
+		--yac-healthy: #198038;
+		--yac-attention: #9a6700;
+		--yac-critical: #da1e28;
+		--yac-warmup: #6f6f6f;
+	}
+	.yac-ocache-range { display: inline-flex; padding: 2px; gap: 2px; background: var(--yac-chart-subtle); border: 1px solid #e0e0e0; border-radius: 7px; }
+	.yac-ocache-range-btn { min-height: 28px; border: 0; background: none; border-radius: 5px; padding: 4px 12px; font-family: inherit; font-size: 11px; font-weight: 400; letter-spacing: .01em; color: var(--yac-chart-muted); cursor: pointer; transition: background .12s, color .12s, box-shadow .12s; }
+	.yac-ocache-range-btn:hover { color: var(--yac-chart-ink); background: rgba(15, 98, 254, .05); }
+	.yac-ocache-range-btn:focus-visible { outline: 2px solid #0f62fe; outline-offset: 1px; }
+	.yac-ocache-range-btn.is-active { background: var(--yac-chart-surface); color: var(--yac-chart-ink); box-shadow: 0 1px 2px rgba(22, 22, 22, .12); }
+	.yac-ocache-metrics, .yac-ocache-chart, .yac-ocache-chart text, .yac-ocache-chart-tip { font-family: inherit; font-variant-numeric: tabular-nums; font-weight: 400; line-height: 1.35; }
+	.yac-ocache-metrics { display: flex; gap: 7px; align-items: baseline; flex-wrap: wrap; }
+	.yac-ocache-metric { display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; min-height: 29px; padding: 4px 7px; border: 1px solid var(--yac-chart-border); border-radius: 4px; background: transparent; color: var(--yac-chart-ink); font: inherit; font-size: 11px; letter-spacing: .005em; }
+	button.yac-ocache-metric { cursor: pointer; }
+	button.yac-ocache-metric:hover { background: var(--yac-chart-subtle); }
+	button.yac-ocache-metric:focus-visible, .yac-ocache-chart:focus-visible { outline: 2px solid #0f62fe; outline-offset: 2px; }
+	.yac-ocache-metric-label { font-size: 11px; font-weight: 400; }
+	.yac-ocache-metric-val { font-size: 11px; font-weight: 500; color: inherit; }
+	.yac-ocache-metric[data-yac-series="rate"], .yac-ocache-metric[data-yac-series="rate"].is-healthy { color: var(--yac-healthy); border-color: var(--yac-healthy); background: #edf9ef; }
+	.yac-ocache-metric[data-yac-series="rate"].is-warning { color: var(--yac-attention); border-color: #d6a800; background: #fff8db; }
+	.yac-ocache-metric[data-yac-series="rate"].is-critical { color: var(--yac-critical); border-color: var(--yac-critical); background: #fff1f1; }
+	.yac-ocache-metric[data-yac-series="rate"].is-warmup { color: var(--yac-warmup); border-color: var(--yac-chart-border); background: var(--yac-chart-subtle); }
+	.yac-ocache-metric[data-yac-series="hits"].is-selected { color: var(--yac-hits); border-color: var(--yac-hits); background: #eef5fb; }
+	.yac-ocache-metric[data-yac-series="miss"].is-selected { color: var(--yac-miss); border-color: var(--yac-miss); background: #fcf0f5; }
+	.yac-ocache-metric[data-yac-series="kicks"].is-selected { color: var(--yac-kicks); border-color: var(--yac-kicks); background: #f4f1fa; }
+	.yac-ocache-metric[data-yac-series="recycles"].is-selected { color: #765500; border-color: var(--yac-recycles); background: #fff7df; }
+	.yac-ocache-metric[data-yac-series="fails"].is-selected { color: var(--yac-fails); border-color: var(--yac-fails); background: #fff2e9; }
+	.yac-ocache-metric[aria-pressed="false"] { color: var(--yac-chart-ink); background: transparent; border-color: var(--yac-chart-border); }
+	.yac-ocache-chart-wrap { position: relative; background: var(--yac-chart-surface); border-radius: 6px; }
 	.yac-ocache-chart { width: 100%; height: auto; display: block; }
-	.yac-ocache-chart text { font-family: Roboto, -apple-system, "Segoe UI", sans-serif; letter-spacing: 0; }
-	.yac-ocache-chart-tip { position: absolute; z-index: 10; pointer-events: none; background: #fff; border: 1px solid #e0e0e1; border-radius: 4px; box-shadow: 0 1px 6px rgba(0, 0, 0, .14); padding: 10px 14px; font-size: 12px; min-width: 150px; }
-	.yac-ocache-chart-tip .d { color: #202124; font-weight: 500; margin-bottom: 6px; }
-	.yac-ocache-chart-tip .row { display: flex; align-items: center; gap: 8px; padding: 2px 0; color: #5f6368; }
-	.yac-ocache-chart-tip .row i { width: 10px; height: 3px; border-radius: 1px; flex: none; }
-	.yac-ocache-chart-tip .row b { margin-left: auto; padding-left: 18px; color: #202124; font-weight: 500; }
-	.yac-ocache-advice-err { background: #fcf0f1; border: 1px solid #f0c0c5; color: #d63638; }
-	.yac-ocache-advice-info { background: #f6f7f7; border: 1px solid #dcdcde; color: #50575e; }
+	.yac-ocache-chart text { fill: var(--yac-chart-muted); letter-spacing: .01em; }
+	.yac-ocache-chart-tip { position: absolute; z-index: 10; pointer-events: none; min-width: 154px; padding: 9px 11px; color: #525252; background: rgba(252, 252, 251, .98); border: 1px solid var(--yac-chart-border); border-radius: 5px; box-shadow: 0 4px 14px rgba(22, 22, 22, .14); font-size: 11px; line-height: 1.45; }
+	.yac-ocache-chart-tip .d { color: var(--yac-chart-ink); font-weight: 500; margin-bottom: 6px; }
+	.yac-ocache-chart-tip .row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+	.yac-ocache-chart-tip .row i { width: 10px; height: 3px; border-radius: 2px; flex: none; }
+	.yac-ocache-chart-tip .row b { margin-left: auto; padding-left: 18px; color: var(--yac-chart-ink); font-weight: 500; }
+	.yac-ocache-advice-warn { background: #fff8db; border-color: #ead58b; color: var(--yac-attention); }
+	.yac-ocache-advice-err { background: #fff1f1; border: 1px solid #f1aeb5; color: var(--yac-critical); }
+	.yac-ocache-advice-info { background: var(--yac-chart-subtle); border: 1px solid var(--yac-chart-border); color: var(--yac-warmup); }

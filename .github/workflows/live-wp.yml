@@ -71,6 +71,13 @@ jobs:
           wp plugin activate yac-ocache
           test -f /tmp/wp/wp-content/object-cache.php
 
+      - name: Run Plugin Check
+        run: |
+          cd /tmp/wp
+          wp plugin install plugin-check --activate
+          wp plugin check yac-ocache --format=table \
+            --require=wp-content/plugins/plugin-check/cli.php
+
       - name: Run the live debug test
         run: |
           cd /tmp/wp

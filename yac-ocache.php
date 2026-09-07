@@ -567,6 +567,7 @@ function yac_ocache_maybe_sample_hitrate() {
 		'hits'       => (int) $info['hits'],
 		'miss'       => (int) $info['miss'],
 		'fails'      => (int) $info['fails'],
+		'kicks'      => (int) $info['kicks'],
 		'recycles'   => (int) $info['recycles'],
 		'start_time' => isset( $info['start_time'] ) ? (int) $info['start_time'] : 0,
 	);
@@ -578,10 +579,13 @@ function yac_ocache_maybe_sample_hitrate() {
 
 	if ( ! empty( $samples ) ) {
 		$last = end( $samples );
-		/* counters reset on flush or a shared-memory restart: the old
-		   series would diff into negative numbers, so drop it */
+		/* Counters reset on flush or a shared-memory restart: retaining a
+		 * previous epoch would make a later window delta invalid. */
 		if ( (int) $last['hits'] > $sample['hits']
 			|| (int) $last['miss'] > $sample['miss']
+			|| ( isset( $last['fails'] ) && (int) $last['fails'] > $sample['fails'] )
+			|| ( isset( $last['kicks'] ) && (int) $last['kicks'] > $sample['kicks'] )
+			|| ( isset( $last['recycles'] ) && (int) $last['recycles'] > $sample['recycles'] )
 			|| (int) $last['start_time'] !== $sample['start_time'] ) {
 			$samples = array();
 		}
@@ -610,9 +614,11 @@ function yac_ocache_hitrate_samples() {
 				'time'       => (int) $sample['time'],
 				'hits'       => (int) $sample['hits'],
 				'miss'       => (int) $sample['miss'],
-				/* older rows recorded before these counters were sampled */
-				'fails'      => isset( $sample['fails'] ) ? (int) $sample['fails'] : 0,
-				'recycles'   => isset( $sample['recycles'] ) ? (int) $sample['recycles'] : 0,
+				/* Missing legacy counters are unknown, not zero: a zero
+				 * value would fabricate an upgrade-spanning window delta. */
+				'fails'      => isset( $sample['fails'] ) ? (int) $sample['fails'] : null,
+				'kicks'      => isset( $sample['kicks'] ) ? (int) $sample['kicks'] : null,
+				'recycles'   => isset( $sample['recycles'] ) ? (int) $sample['recycles'] : null,
 				'start_time' => (int) $sample['start_time'],
 			);
 		}
@@ -629,44 +635,115 @@ function yac_ocache_hitrate_samples() {
 function yac_ocache_hitrate_windows( $samples, $info, array $window_seconds ) {
 	$out = array( 'samples' => $samples, 'start_time' => null );
 	foreach ( $window_seconds as $label => $seconds ) {
-		$out[ $label ] = array( 'rate' => null, 'lookups' => 0 );
+		$out[ $label ] = array(
+			'available'                 => false,
+			'complete'                  => false,
+			'observed_seconds'          => 0,
+			'rate'                      => null,
+			'lookups'                   => 0,
+			'hits'                      => null,
+			'miss'                      => null,
+			'kicks'                     => null,
+			'kicks_complete'            => false,
+			'kicks_observed_seconds'    => 0,
+			'fails'                     => null,
+			'fails_complete'            => false,
+			'fails_observed_seconds'    => 0,
+			'recycles'                  => null,
+			'recycles_complete'         => false,
+			'recycles_observed_seconds' => 0,
+		);
 	}
 
-	if ( count( $samples ) < 2 || ! $info ) {
+	if ( ! is_array( $samples ) || ! $samples || ! is_array( $info ) ) {
 		return $out;
 	}
 
 	$out['start_time'] = (int) $samples[0]['start_time'];
 	$now               = time();
-	$now_hits          = (int) $info['hits'];
-	$now_miss          = (int) $info['miss'];
+	$info_start        = isset( $info['start_time'] ) ? (int) $info['start_time'] : 0;
 
 	foreach ( $window_seconds as $label => $seconds ) {
-		/* anchor = latest sample at or before the window start; when the
-		   whole series fits the window it is the first sample */
-		$anchor = null;
+		$window_start = $now - $seconds;
+		$anchor       = null;
+		$complete     = false;
+
+		/* The newest sample at or before the boundary is the reliable
+		 * baseline for a full window. */
 		foreach ( $samples as $sample ) {
-			if ( $sample['time'] > $now - $seconds ) {
+			if ( $sample['time'] > $window_start ) {
 				break;
 			}
 			$anchor = $sample;
 		}
-		if ( null === $anchor ) {
+		if ( null !== $anchor ) {
+			$complete = true;
+		} else {
+			/* A shorter, current-epoch observation is still useful only when
+			 * Yac tells us that this cache itself began inside the window.
+			 * Retention gaps in an older epoch are not a valid baseline. */
 			$anchor = $samples[0];
+			if ( ! $info_start || (int) $anchor['start_time'] !== $info_start || $info_start <= $window_start ) {
+				continue;
+			}
 		}
-
-		$d_hits    = $now_hits - $anchor['hits'];
-		$d_miss    = $now_miss - $anchor['miss'];
-		$d_lookups = $d_hits + $d_miss;
-
-		if ( $d_lookups < YAC_OCACHE_WINDOW_MIN_LOOKUPS ) {
+		if ( $info_start && (int) $anchor['start_time'] !== $info_start ) {
+			continue;
+		}
+		if ( ! isset( $info['hits'], $info['miss'] ) ) {
 			continue;
 		}
 
-		$out[ $label ] = array(
-			'rate'    => $d_lookups > 0 ? $d_hits / $d_lookups * 100 : null,
-			'lookups' => $d_lookups,
-		);
+		$hits = (int) $info['hits'] - (int) $anchor['hits'];
+		$miss = (int) $info['miss'] - (int) $anchor['miss'];
+		if ( $hits < 0 || $miss < 0 ) {
+			continue;
+		}
+
+		$lookups = $hits + $miss;
+		$out[ $label ]['available']        = true;
+		$out[ $label ]['complete']         = $complete;
+		$out[ $label ]['observed_seconds'] = $complete ? $seconds : max( 0, $now - $info_start );
+		$out[ $label ]['hits']             = $hits;
+		$out[ $label ]['miss']             = $miss;
+		$out[ $label ]['lookups']          = $lookups;
+		if ( $lookups >= YAC_OCACHE_WINDOW_MIN_LOOKUPS ) {
+			$out[ $label ]['rate'] = $hits / $lookups * 100;
+		}
+
+		foreach ( array( 'kicks', 'fails', 'recycles' ) as $counter ) {
+			/* Older retained samples may predate this counter. Prefer the newest
+			 * baseline at/before the window boundary; otherwise report the delta
+			 * since the first sample that carries it and mark that span partial. */
+			$counter_anchor   = null;
+			$counter_complete = false;
+			foreach ( $samples as $sample ) {
+				if ( (int) $sample['start_time'] !== (int) $anchor['start_time']
+					|| ! array_key_exists( $counter, $sample )
+					|| null === $sample[ $counter ] ) {
+					continue;
+				}
+				if ( $sample['time'] <= $window_start ) {
+					$counter_anchor   = $sample;
+					$counter_complete = true;
+					continue;
+				}
+				if ( null === $counter_anchor ) {
+					$counter_anchor = $sample;
+				}
+				break;
+			}
+			if ( null !== $counter_anchor && array_key_exists( $counter, $info ) && null !== $info[ $counter ] ) {
+				$delta = (int) $info[ $counter ] - (int) $counter_anchor[ $counter ];
+				if ( $delta >= 0 ) {
+					$out[ $label ][ $counter ]                         = $delta;
+					$out[ $label ][ $counter . '_complete' ]           = $counter_complete;
+					$out[ $label ][ $counter . '_observed_seconds' ]   = $counter_complete
+						? $seconds
+						: max( 0, $now - (int) $counter_anchor['time'] );
+				}
+			}
+		}
 	}
 
 	return $out;
@@ -695,26 +772,53 @@ function yac_ocache_chart_data( $samples, $info ) {
 	$yday_start = $zone
 		? (int) ( new DateTimeImmutable( 'yesterday midnight', $zone ) )->getTimestamp()
 		: $day_start - DAY_IN_SECONDS;
+	/* Last 7 days includes today: six complete calendar days plus today
+	 * through the current sample, never zero-filled future hours. */
 	$week_start = $zone
 		? (int) ( new DateTimeImmutable( '-6 days midnight', $zone ) )->getTimestamp()
 		: $day_start - 6 * DAY_IN_SECONDS;
 
 	$min_since = $yday_start;
+	$min       = array( 't' => array(), 'h' => array(), 'm' => array(), 'k' => array(), 'f' => array(), 'r' => array() );
+	$hr        = array( 't' => array(), 'h' => array(), 'm' => array(), 'k' => array(), 'f' => array(), 'r' => array() );
+	$counters  = array( 'kicks' => 'k', 'fails' => 'f', 'recycles' => 'r' );
 
-	$min = array( 't' => array(), 'h' => array(), 'm' => array(), 'f' => array(), 'r' => array() );
-	$hr  = array( 't' => array(), 'h' => array(), 'm' => array(), 'f' => array(), 'r' => array() );
+	/* Missing legacy counters are unknown rather than zero. Every delta
+	 * column therefore describes exactly one sampling interval or null. */
+	$counter_delta = static function( $sample, $base, $counter ) {
+		if ( ! is_array( $base ) || ! array_key_exists( $counter, $sample ) || ! array_key_exists( $counter, $base ) || null === $sample[ $counter ] || null === $base[ $counter ] ) {
+			return null;
+		}
+		$delta = (int) $sample[ $counter ] - (int) $base[ $counter ];
+		return $delta >= 0 ? $delta : null;
+	};
+	$add_hour_delta = static function( &$columns, $last, $field, $delta ) {
+		/* Unknown intervals do not erase known deltas in the same hour. The
+		 * bucket stays null only until its first observed counter delta. */
+		if ( null === $delta ) {
+			return;
+		}
+		$columns[ $field ][ $last ] = null === $columns[ $field ][ $last ]
+			? $delta
+			: $columns[ $field ][ $last ] + $delta;
+	};
 
 	foreach ( $samples as $i => $sample ) {
-		$base   = $samples[ max( 0, $i - 1 ) ];
-		$d_hits = (int) $sample['hits'] - (int) $base['hits'];
-		$d_miss = (int) $sample['miss'] - (int) $base['miss'];
+		$base   = $i > 0 ? $samples[ $i - 1 ] : null;
+		$d_hits = $base ? (int) $sample['hits'] - (int) $base['hits'] : 0;
+		$d_miss = $base ? (int) $sample['miss'] - (int) $base['miss'] : 0;
+		$deltas = array();
+		foreach ( $counters as $counter => $field ) {
+			$deltas[ $field ] = $counter_delta( $sample, $base, $counter );
+		}
 
 		if ( $sample['time'] >= $min_since ) {
 			$min['t'][] = (int) $sample['time'];
 			$min['h'][] = $d_hits;
 			$min['m'][] = $d_miss;
-			$min['f'][] = isset( $sample['fails'] ) ? (int) $sample['fails'] : 0;
-			$min['r'][] = isset( $sample['recycles'] ) ? (int) $sample['recycles'] : 0;
+			foreach ( $deltas as $field => $delta ) {
+				$min[ $field ][] = $delta;
+			}
 		}
 
 		$hour = (int) floor( $sample['time'] / HOUR_IN_SECONDS ) * HOUR_IN_SECONDS;
@@ -722,42 +826,59 @@ function yac_ocache_chart_data( $samples, $info ) {
 			$hr['t'][] = $hour;
 			$hr['h'][] = 0;
 			$hr['m'][] = 0;
+			foreach ( $counters as $field ) {
+				$hr[ $field ][] = null;
+			}
 		}
-		$last           = count( $hr['t'] ) - 1;
+		$last = count( $hr['t'] ) - 1;
 		$hr['h'][ $last ] += $d_hits;
 		$hr['m'][ $last ] += $d_miss;
-		$hr['f'][ $last ]  = isset( $sample['fails'] ) ? (int) $sample['fails'] : 0;
-		$hr['r'][ $last ]  = isset( $sample['recycles'] ) ? (int) $sample['recycles'] : 0;
+		foreach ( $deltas as $field => $delta ) {
+			$add_hour_delta( $hr, $last, $field, $delta );
+		}
 	}
 
-	/* fold the live counters in as the trailing vertex of each set */
+	/* Fold the current counters into the trailing interval. Event-only
+	 * changes must create a vertex so failures and recycles are observable. */
 	if ( $info && $samples ) {
 		$last_s = $samples[ count( $samples ) - 1 ];
 		$dh     = (int) $info['hits'] - (int) $last_s['hits'];
 		$dm     = (int) $info['miss'] - (int) $last_s['miss'];
-		if ( $dh + $dm > 0 ) {
+		$deltas = array();
+		foreach ( $counters as $counter => $field ) {
+			$deltas[ $field ] = $counter_delta( $info, $last_s, $counter );
+		}
+		$changed = $dh + $dm > 0;
+		foreach ( $deltas as $delta ) {
+			$changed = $changed || ( null !== $delta && $delta > 0 );
+		}
+
+		if ( $changed ) {
 			if ( $min['t'] ) {
 				$min['t'][] = $now;
 				$min['h'][] = $dh;
 				$min['m'][] = $dm;
-				$min['f'][] = isset( $info['fails'] ) ? (int) $info['fails'] : 0;
-				$min['r'][] = isset( $info['recycles'] ) ? (int) $info['recycles'] : 0;
+				foreach ( $deltas as $field => $delta ) {
+					$min[ $field ][] = $delta;
+				}
 			}
+
 			$hour = (int) floor( $now / HOUR_IN_SECONDS ) * HOUR_IN_SECONDS;
 			if ( $hr['t'] && end( $hr['t'] ) === $hour ) {
-				$last             = count( $hr['t'] ) - 1;
+				$last = count( $hr['t'] ) - 1;
 				$hr['h'][ $last ] += $dh;
 				$hr['m'][ $last ] += $dm;
+				foreach ( $deltas as $field => $delta ) {
+					$add_hour_delta( $hr, $last, $field, $delta );
+				}
 			} else {
 				$hr['t'][] = $hour;
 				$hr['h'][] = $dh;
 				$hr['m'][] = $dm;
+				foreach ( $deltas as $field => $delta ) {
+					$hr[ $field ][] = $delta;
+				}
 			}
-		}
-		if ( $hr['t'] ) {
-			$last             = count( $hr['t'] ) - 1;
-			$hr['f'][ $last ] = isset( $info['fails'] ) ? (int) $info['fails'] : 0;
-			$hr['r'][ $last ] = isset( $info['recycles'] ) ? (int) $info['recycles'] : 0;
 		}
 	}
 
@@ -767,7 +888,7 @@ function yac_ocache_chart_data( $samples, $info ) {
 		'ranges'     => array(
 			'today' => array( $day_start, $day_end ),
 			'yday'  => array( $yday_start, $yday_end ),
-			'week'  => array( $week_start, $day_end ),
+			'week'  => array( $week_start, $now ),
 		),
 		'now'        => $now,
 		'interval'   => YAC_OCACHE_SAMPLE_INTERVAL,
@@ -991,11 +1112,10 @@ function yac_ocache_admin_enqueue_scripts( $hook ) {
 	) );
 
 	if ( $screen && false !== strpos( $screen->id, YAC_OCACHE_ADMIN_PAGE ) ) {
-		/* GSC's chart face is Roboto; without it the admin's system font
-		   reads off against the chart, metrics and range buttons */
-		wp_enqueue_style( 'yac-ocache-fonts', 'https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap', array(), YAC_OCACHE_VERSION );
-		wp_enqueue_style( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache.css', array(), YAC_OCACHE_VERSION );
-		wp_enqueue_script( 'yac-ocache-chart', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-chart.js', array(), YAC_OCACHE_VERSION, true );
+		$yac_ocache_css_version   = filemtime( __DIR__ . '/assets/yac-ocache.css' );
+		$yac_ocache_chart_version = filemtime( __DIR__ . '/assets/yac-ocache-chart.js' );
+		wp_enqueue_style( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache.css', array(), $yac_ocache_css_version );
+		wp_enqueue_script( 'yac-ocache-chart', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-chart.js', array(), $yac_ocache_chart_version, true );
 		wp_enqueue_script( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-admin.js', array( 'yac-ocache-chart' ), YAC_OCACHE_VERSION, true );
 	}
 }
@@ -1033,20 +1153,34 @@ function yac_ocache_render_dashboard_widget() {
 
 	$health = yac_ocache_health( $info, yac_ocache_memory_snapshot( 10, yac_ocache_key_prefix(), 60 ) );
 
-	$colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638', 'warmup' => '#8c8f94' );
+	$colors = array( 'green' => '#198038', 'yellow' => '#9a6700', 'red' => '#da1e28', 'warmup' => '#6f6f6f' );
 	$color  = $colors[ $health['verdict'] ];
 	$chips  = array( 'green' => '✓ Healthy', 'yellow' => '⚠ Attention', 'red' => '✗ Critical', 'warmup' => '… Warming up' );
 
-	/* ring shows the last-24h hit rate; before enough samples land it
-	   falls back to the since-boot cumulative rate so the widget is never
-	   blank. $ring_window labels which one is on display */
-	$windows_24h  = yac_ocache_hitrate_windows( yac_ocache_hitrate_samples(), $info, array( '24h' => DAY_IN_SECONDS ) );
-	$ring_rate    = null !== $windows_24h['24h']['rate'] ? $windows_24h['24h']['rate'] : $health['rate'];
-	$ring_window  = null !== $windows_24h['24h']['rate'] ? 'hit rate, 24 h' : 'hit rate';
+	/* Every displayed cache counter comes from this same 24-hour delta.
+	 * Incomplete history remains unavailable; never use a since-boot fallback. */
+	$windows_24h = yac_ocache_hitrate_windows( yac_ocache_hitrate_samples(), $info, array( '24h' => DAY_IN_SECONDS ) );
+	$window      = $windows_24h['24h'];
+	$ring_rate   = $window['rate'];
+	$ring_window = 'hit rate, 24 h';
 
-	$warmup     = 'warmup' === $health['verdict'];
-	$ring_label = $warmup ? 'N/A' : round( $ring_rate, 1 ) . '%';
-	$ratio      = $warmup ? 0 : max( 0, min( 1, $ring_rate / 100 ) );
+	$warming     = ! $window['complete'];
+	$unavailable = null === $ring_rate;
+	$ring_label  = $unavailable ? 'N/A' : round( $ring_rate, 1 ) . '%';
+	$ratio       = $unavailable ? 0 : max( 0, min( 1, $ring_rate / 100 ) );
+	$format_24h  = static function( $value ) {
+		return null === $value ? '—' : yac_ocache_format_kmb( $value );
+	};
+	if ( ! $window['available'] ) {
+		$history_note = 'Collecting 24-hour history.';
+	} elseif ( $warming ) {
+		$history_note = sprintf( 'Collecting 24-hour history — %s observed since this cache started.', yac_ocache_format_uptime( $window['observed_seconds'] ) );
+	} elseif ( $unavailable ) {
+		$history_note = sprintf( '24-hour baseline is ready; waiting for %s lookups.', number_format_i18n( YAC_OCACHE_WINDOW_MIN_LOOKUPS ) );
+	} else {
+		$history_note = '';
+	}
+
 	$r          = 45;
 	$circ       = 2 * M_PI * $r;
 
@@ -1060,15 +1194,18 @@ function yac_ocache_render_dashboard_widget() {
 				<circle cx="60" cy="60" r="<?php echo esc_attr( $r ); ?>" stroke="#f0f0f1" stroke-width="12" fill="none"/>
 				<circle cx="60" cy="60" r="<?php echo esc_attr( $r ); ?>" stroke="<?php echo esc_attr( $color ); ?>" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="<?php echo esc_attr( round( $circ * $ratio, 2 ) ); ?> <?php echo esc_attr( round( $circ, 2 ) ); ?>" transform="rotate(-90 60 60)"/>
 				<text x="60" y="58" font-size="21" font-weight="600" fill="#1d2327" text-anchor="middle"><?php echo esc_html( $ring_label ); ?></text>
-				<text x="60" y="76" font-size="10" fill="#646970" text-anchor="middle"><?php echo esc_html( $warmup ? 'warming up' : $ring_window ); ?></text>
+				<text x="60" y="76" font-size="10" fill="#646970" text-anchor="middle"><?php echo esc_html( $unavailable ? 'collecting history' : $ring_window ); ?></text>
 			</svg>
-			<div style="margin-top: 6px; border-radius: 20px; padding: 3px 12px; font-size: 12px; font-weight: 600; color: <?php echo esc_attr( $color ); ?>; background: <?php echo 'green' === $health['verdict'] ? '#edfaef' : ( 'yellow' === $health['verdict'] ? '#fcf9e8' : ( 'warmup' === $health['verdict'] ? '#f0f0f1' : '#fcf0f1' ) ); ?>;"><?php echo esc_html( $chips[ $health['verdict'] ] ); ?></div>
+			<div style="margin-top: 6px; border-radius: 20px; padding: 3px 12px; font-size: 12px; font-weight: 600; color: <?php echo esc_attr( $color ); ?>; background: <?php echo 'green' === $health['verdict'] ? '#edf9ef' : ( 'yellow' === $health['verdict'] ? '#fff8db' : ( 'warmup' === $health['verdict'] ? '#f4f4f4' : '#fff1f1' ) ); ?>;"><?php echo esc_html( $chips[ $health['verdict'] ] ); ?></div>
+			<?php if ( '' !== $history_note ) : ?>
+				<div style="max-width: 150px; margin-top: 6px; font-size: 11px; line-height: 1.35; text-align: center; color: #646970;"><?php echo esc_html( $history_note ); ?></div>
+			<?php endif; ?>
 		</div>
 		<div style="flex: 1; min-width: 220px; font-size: 13px; color: #50575e;">
 			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Keys' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( $keys_used ) . ' / ' . number_format_i18n( $keys_total ) ); ?></strong></div>
 			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Values occupied' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( yac_ocache_format_bytes( $health['vals_pct'] / 100 * $values_total ) . ' / ' . yac_ocache_format_bytes( $values_total ) ); ?></strong></div>
-			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Hits / Misses' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( (int) $info['hits'] ) . ' / ' . number_format_i18n( (int) $info['miss'] ) ); ?></strong></div>
-			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Kicks / Recycles' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( (int) $info['kicks'] ) . ' / ' . number_format_i18n( (int) $info['recycles'] ) ); ?></strong></div>
+				<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Hits / Misses (24 h)' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( $format_24h( $window['hits'] ) . ' / ' . $format_24h( $window['miss'] ) ); ?></strong></div>
+				<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Kicks / Fails / Recycles (24 h)' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( $format_24h( $window['kicks'] ) . ' / ' . $format_24h( $window['fails'] ) . ' / ' . $format_24h( $window['recycles'] ) ); ?></strong></div>
 			<p style="margin: 8px 0 0;"><a href="<?php echo esc_url( admin_url( 'tools.php?page=' . YAC_OCACHE_ADMIN_PAGE ) ); ?>"><?php echo esc_html( 'Full dashboard' ); ?></a></p>
 		</div>
 	</div>
@@ -1378,7 +1515,7 @@ function yac_ocache_render_admin_page() {
 			$snapshot = yac_ocache_memory_snapshot( 10, yac_ocache_key_prefix() );
 			$health   = yac_ocache_health( $info, $snapshot );
 
-			$health_colors = array( 'green' => '#00a32a', 'yellow' => '#dba617', 'red' => '#d63638', 'warmup' => '#8c8f94' );
+			$health_colors = array( 'green' => '#198038', 'yellow' => '#9a6700', 'red' => '#da1e28', 'warmup' => '#6f6f6f' );
 			$health_color  = $health_colors[ $health['verdict'] ];
 
 			$keys_used    = (int) $health['keys_used'];
@@ -1399,7 +1536,7 @@ function yac_ocache_render_admin_page() {
 				);
 			}
 			?>
-			<h2><?php echo esc_html( 'Cache health' ); ?></h2>
+			<h2><?php echo esc_html( 'Cache status' ); ?></h2>
 			<div class="yac-ocache-panel">
 				<?php
 				$yac_ocache_samples    = yac_ocache_hitrate_samples();
@@ -1411,10 +1548,11 @@ function yac_ocache_render_admin_page() {
 					<div class="yac-ocache-health-top">
 						<div class="yac-ocache-metrics">
 							<span class="yac-ocache-metric" data-yac-series="rate"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Hit rate' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
-							<span class="yac-ocache-metric" data-yac-series="hits"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Hits' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
-							<span class="yac-ocache-metric" data-yac-series="miss"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Misses' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
-							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="fails"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Fails' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
-							<span class="yac-ocache-metric yac-ocache-metric-stat" data-yac-stat="recycles"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Recycles' ); ?></span><span class="yac-ocache-metric-val">—</span></span>
+							<button type="button" class="yac-ocache-metric is-selected" data-yac-series="hits" aria-pressed="true"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Hits' ); ?></span><span class="yac-ocache-metric-val">—</span></button>
+							<button type="button" class="yac-ocache-metric is-selected" data-yac-series="miss" aria-pressed="true"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Misses' ); ?></span><span class="yac-ocache-metric-val">—</span></button>
+							<button type="button" class="yac-ocache-metric is-selected" data-yac-series="kicks" aria-pressed="true"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Kicks' ); ?></span><span class="yac-ocache-metric-val">—</span></button>
+							<button type="button" class="yac-ocache-metric is-selected" data-yac-series="recycles" aria-pressed="true"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Recycles' ); ?></span><span class="yac-ocache-metric-val">—</span></button>
+							<button type="button" class="yac-ocache-metric is-selected" data-yac-series="fails" aria-pressed="true"><span class="yac-ocache-metric-label"><?php echo esc_html( 'Fails' ); ?></span><span class="yac-ocache-metric-val">—</span></button>
 						</div>
 						<div class="yac-ocache-range" role="group" aria-label="<?php echo esc_attr( 'Trend range' ); ?>">
 							<button type="button" class="yac-ocache-range-btn is-active" data-yac-range="today" aria-pressed="true"><?php echo esc_html( 'Today' ); ?></button>
@@ -1424,8 +1562,8 @@ function yac_ocache_render_admin_page() {
 					</div>
 					<div class="yac-ocache-windows">
 						<div class="yac-ocache-chart-wrap">
-							<svg class="yac-ocache-chart" role="img" aria-label="hit rate and lookup volume over time"></svg>
-							<div class="yac-ocache-chart-tip" hidden></div>
+							<svg class="yac-ocache-chart" role="img" aria-label="hit rate with selectable hits, misses, and kicks trend lines plus recycle and failure event markers"></svg>
+							<div class="yac-ocache-chart-tip" aria-live="polite" hidden></div>
 						</div>
 						<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Shared memory running since %s (reset by a flush or restart); a dash means fewer than %s lookups in a bucket.', $yac_ocache_start_time ? date_i18n( 'M j, H:i', $yac_ocache_start_time ) : '—', number_format_i18n( YAC_OCACHE_WINDOW_MIN_LOOKUPS ) ) ); ?></p>
 					</div>
@@ -1475,8 +1613,8 @@ function yac_ocache_render_admin_page() {
 						</div>
 						<div class="yac-ocache-contents-right">
 							<ul class="yac-ocache-op-list">
-								<li><span><?php echo esc_html( 'Total entries' ); ?></span><strong><?php echo esc_html( number_format_i18n( $snapshot['entries'] ) ); ?></strong></li>
-								<li><span><?php echo esc_html( 'Occupied (Σ size, padded)' ); ?></span><strong><?php echo esc_html( yac_ocache_format_bytes( $snapshot['occupied'] ) ); ?></strong></li>
+								<li><span><?php echo esc_html( 'Total entries' ); ?></span><strong><?php echo esc_html( number_format_i18n( $snapshot['entries'] ) ); ?> <small>/ <?php echo esc_html( number_format_i18n( (int) $info['slots_size'] ) ); ?> slots</small></strong></li>
+								<li><span><?php echo esc_html( 'Occupied (Σ size, padded)' ); ?></span><strong><?php echo esc_html( yac_ocache_format_bytes( $snapshot['occupied'] ) ); ?> <small>/ <?php echo esc_html( yac_ocache_format_bytes( (int) $info['values_memory_size'] ) ); ?></small></strong></li>
 								<li><span><?php echo esc_html( 'Content (Σ v_len)' ); ?></span><strong><?php echo esc_html( yac_ocache_format_bytes( $snapshot['bytes'] ) ); ?></strong></li>
 								<li><span><?php echo esc_html( 'Average occupied / entry' ); ?></span><strong><?php echo esc_html( yac_ocache_format_bytes( $snapshot['average'] ) ); ?></strong></li>
 							</ul>
