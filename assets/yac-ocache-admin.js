@@ -58,14 +58,16 @@
 					'<li><span>Occupied (padded)</span><strong>' + esc( d.size ) + '</strong></li>',
 					'<li><span>Expires</span><strong>' + ( d.ttl ? esc( epoch( d.ttl ) ) : 'never' ) + '</strong></li>'
 				];
-			if ( d.atime ) {
-				rows.push( '<li><span>Last access</span><strong>' + esc( epoch( d.atime ) ) + '</strong></li>' );
-			}
-			if ( d.hits != null ) {
-				rows.push( '<li><span>Hits</span><strong>' + esc( num( d.hits ) ) + '</strong></li>' );
-			}
-			if ( d.embedded != null ) {
-				rows.push( '<li><span>Embedded in slot</span><strong>' + ( d.embedded ? 'yes' : 'no' ) + '</strong></li>' );
+			if ( d.access ) {
+				if ( d.access.atime ) {
+					rows.push( '<li><span>Last access</span><strong>' + esc( epoch( d.access.atime ) ) + '</strong></li>' );
+				}
+				if ( d.access.hits != null ) {
+					rows.push( '<li><span>Hits</span><strong>' + esc( num( d.access.hits ) ) + '</strong></li>' );
+				}
+				if ( d.access.embedded != null ) {
+					rows.push( '<li><span>Embedded in slot</span><strong>' + ( d.access.embedded ? 'yes' : 'no' ) + '</strong></li>' );
+				}
 			}
 			metaEl.innerHTML = rows.join( '' );
 			if ( d.gone ) {

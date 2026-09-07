@@ -41,7 +41,7 @@
 	.yac-ocache-contents-left .yac-ocache-pie { width: 240px; height: 240px; }
 	.yac-ocache-contents-left .yac-ocache-pie-legend { flex: none; width: 100%; max-width: 300px; margin-top: 12px; }
 	.yac-ocache-contents-right { flex: 1 1 480px; min-width: 320px; }
-	.yac-ocache-entry-bars-lg li { font-size: 13px; padding: 5px 0; }
+	.yac-ocache-entry-bars-lg li:not(.yac-ocache-entry-caption) { font-size: 13px; padding: 2px 0; }
 	button.yac-ocache-entry-inspect { width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; font-family: Consolas, Monaco, monospace; font-size: 12px; color: #2271b1; background: none; border: 0; padding: 0; margin: 0; text-align: left; cursor: pointer; }
 	button.yac-ocache-entry-inspect:hover { color: #135e96; text-decoration: underline; }
 	.yac-ocache-entry-bars-lg button.yac-ocache-entry-inspect { font-size: 13px; }

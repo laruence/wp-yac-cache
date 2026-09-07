@@ -62,14 +62,14 @@
 			cards[ key ].querySelector( '.yac-ocache-metric-val' ).textContent = text;
 		}
 	}
-	function setRateCard( rate, enough ) {
+	function setRateCard( rate, enough, healthReady ) {
 		var card = cards.rate;
 		if ( ! card ) {
 			return;
 		}
 		card.querySelector( '.yac-ocache-metric-val' ).textContent = enough ? ( rate * 100 ).toFixed( 1 ) + '%' : '—';
 		card.classList.remove( 'is-healthy', 'is-warning', 'is-critical', 'is-warmup' );
-		card.classList.add( enough ? 'is-' + levelOf( rate ) : 'is-warmup' );
+		card.classList.add( enough && healthReady ? 'is-' + levelOf( rate ) : 'is-warmup' );
 	}
 	function fmtK( value ) {
 		if ( ! value || value < 0 ) {
@@ -316,7 +316,7 @@
 		} );
 		var lookups = sumH + sumM;
 		var averageRate = lookups >= data.minLookups ? sumH / lookups : null;
-		setRateCard( averageRate, null !== averageRate );
+		setRateCard( averageRate, null !== averageRate, data.healthReady );
 		setCard( 'hits', fmtK( sumH ) );
 		setCard( 'miss', fmtK( sumM ) );
 		setCard( 'kicks', known.k ? fmtK( sums.k ) : '—' );
@@ -372,7 +372,7 @@
 		mk( 'line', { x1: PL, y1: separatorY, x2: W - PR, y2: separatorY, stroke: CHROME.grid, 'stroke-width': 1 } );
 		mk( 'line', { x1: PL, y1: bot, x2: W - PR, y2: bot, stroke: CHROME.axis, 'stroke-width': 1 } );
 		var averageBadge = null;
-		if ( null !== averageRate ) {
+		if ( null !== averageRate && data.healthReady ) {
 			var averageY = yRate( averageRate );
 			var averageStatus = STATUS[ levelOf( averageRate ) ];
 			mk( 'line', {

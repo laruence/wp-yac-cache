@@ -890,9 +890,10 @@ function yac_ocache_chart_data( $samples, $info ) {
 			'yday'  => array( $yday_start, $yday_end ),
 			'week'  => array( $week_start, $now ),
 		),
-		'now'        => $now,
-		'interval'   => YAC_OCACHE_SAMPLE_INTERVAL,
-		'minLookups' => YAC_OCACHE_WINDOW_MIN_LOOKUPS,
+		'now'         => $now,
+		'interval'    => YAC_OCACHE_SAMPLE_INTERVAL,
+		'minLookups'  => YAC_OCACHE_WINDOW_MIN_LOOKUPS,
+		'healthReady' => $info && (int) $info['hits'] + (int) $info['miss'] >= YAC_OCACHE_WARMUP_LOOKUPS,
 	);
 }
 
@@ -1114,9 +1115,10 @@ function yac_ocache_admin_enqueue_scripts( $hook ) {
 	if ( $screen && false !== strpos( $screen->id, YAC_OCACHE_ADMIN_PAGE ) ) {
 		$yac_ocache_css_version   = filemtime( __DIR__ . '/assets/yac-ocache.css' );
 		$yac_ocache_chart_version = filemtime( __DIR__ . '/assets/yac-ocache-chart.js' );
+		$yac_ocache_admin_version = filemtime( __DIR__ . '/assets/yac-ocache-admin.js' );
 		wp_enqueue_style( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache.css', array(), $yac_ocache_css_version );
 		wp_enqueue_script( 'yac-ocache-chart', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-chart.js', array(), $yac_ocache_chart_version, true );
-		wp_enqueue_script( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-admin.js', array( 'yac-ocache-chart' ), YAC_OCACHE_VERSION, true );
+		wp_enqueue_script( 'yac-ocache-admin', YAC_OCACHE_PLUGIN_URL . 'assets/yac-ocache-admin.js', array( 'yac-ocache-chart' ), $yac_ocache_admin_version, true );
 	}
 }
 
@@ -1164,22 +1166,12 @@ function yac_ocache_render_dashboard_widget() {
 	$ring_rate   = $window['rate'];
 	$ring_window = 'hit rate, 24 h';
 
-	$warming     = ! $window['complete'];
 	$unavailable = null === $ring_rate;
 	$ring_label  = $unavailable ? 'N/A' : round( $ring_rate, 1 ) . '%';
 	$ratio       = $unavailable ? 0 : max( 0, min( 1, $ring_rate / 100 ) );
 	$format_24h  = static function( $value ) {
 		return null === $value ? '—' : yac_ocache_format_kmb( $value );
 	};
-	if ( ! $window['available'] ) {
-		$history_note = 'Collecting 24-hour history.';
-	} elseif ( $warming ) {
-		$history_note = sprintf( 'Collecting 24-hour history — %s observed since this cache started.', yac_ocache_format_uptime( $window['observed_seconds'] ) );
-	} elseif ( $unavailable ) {
-		$history_note = sprintf( '24-hour baseline is ready; waiting for %s lookups.', number_format_i18n( YAC_OCACHE_WINDOW_MIN_LOOKUPS ) );
-	} else {
-		$history_note = '';
-	}
 
 	$r          = 45;
 	$circ       = 2 * M_PI * $r;
@@ -1187,6 +1179,9 @@ function yac_ocache_render_dashboard_widget() {
 	$keys_total   = (int) $info['slots_size'];
 	$keys_used    = (int) $health['keys_used'];
 	$values_total = (int) $info['values_memory_size'];
+	$running_for  = isset( $info['start_time'] )
+		? yac_ocache_format_uptime( max( 0, time() - (int) $info['start_time'] ) )
+		: '—';
 	?>
 	<div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
 		<div style="display: flex; flex-direction: column; align-items: center;">
@@ -1197,12 +1192,10 @@ function yac_ocache_render_dashboard_widget() {
 				<text x="60" y="76" font-size="10" fill="#646970" text-anchor="middle"><?php echo esc_html( $unavailable ? 'collecting history' : $ring_window ); ?></text>
 			</svg>
 			<div style="margin-top: 6px; border-radius: 20px; padding: 3px 12px; font-size: 12px; font-weight: 600; color: <?php echo esc_attr( $color ); ?>; background: <?php echo 'green' === $health['verdict'] ? '#edf9ef' : ( 'yellow' === $health['verdict'] ? '#fff8db' : ( 'warmup' === $health['verdict'] ? '#f4f4f4' : '#fff1f1' ) ); ?>;"><?php echo esc_html( $chips[ $health['verdict'] ] ); ?></div>
-			<?php if ( '' !== $history_note ) : ?>
-				<div style="max-width: 150px; margin-top: 6px; font-size: 11px; line-height: 1.35; text-align: center; color: #646970;"><?php echo esc_html( $history_note ); ?></div>
-			<?php endif; ?>
 		</div>
 		<div style="flex: 1; min-width: 220px; font-size: 13px; color: #50575e;">
-			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Keys' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( $keys_used ) . ' / ' . number_format_i18n( $keys_total ) ); ?></strong></div>
+			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Running for' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( $running_for ); ?></strong></div>
+			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Key slots used' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( number_format_i18n( $keys_used ) . ' / ' . number_format_i18n( $keys_total ) ); ?></strong></div>
 			<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Values occupied' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( yac_ocache_format_bytes( $health['vals_pct'] / 100 * $values_total ) . ' / ' . yac_ocache_format_bytes( $values_total ) ); ?></strong></div>
 				<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Hits / Misses (24 h)' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( $format_24h( $window['hits'] ) . ' / ' . $format_24h( $window['miss'] ) ); ?></strong></div>
 				<div style="display: flex; justify-content: space-between; padding: 3px 0;"><span><?php echo esc_html( 'Kicks / Fails / Recycles (24 h)' ); ?></span><strong style="color: #1d2327;"><?php echo esc_html( $format_24h( $window['kicks'] ) . ' / ' . $format_24h( $window['fails'] ) . ' / ' . $format_24h( $window['recycles'] ) ); ?></strong></div>
@@ -1307,10 +1300,8 @@ function yac_ocache_ajax_dismiss_status_notice() {
 	wp_send_json_success();
 }
 
-/* entry inspector: per-entry metadata from Yac::dump(), the deserialized
-   value via get(). atime/hits/embedded only exist in newer yac builds —
-   detected at runtime, shown as unavailable otherwise. ttl is an absolute
-   expiry timestamp in every build (0 = never). */
+/* Entry details combine Yac::dump() metadata with the deserialized value.
+ * Optional access metadata is omitted when the Yac build does not expose it. */
 function yac_ocache_entry_detail( $yac, $key ) {
 	$meta = null;
 	$dump = yac_ocache_dump_all( $yac );
@@ -1343,25 +1334,33 @@ function yac_ocache_entry_detail( $yac, $key ) {
 		$content = substr( $content, 0, 131072 );
 	}
 
-	return array(
+	$detail = array(
 		'key'         => $key,
 		'v_len'       => $meta ? yac_ocache_format_bytes( $meta['v_len'] ) : '—',
-		/* c_len: the compressed payload actually stored, present only for
-		   compressed entries (Yac >= 2.4.0 dumps); on those v_len is the
-		   original uncompressed length */
+		/* c_len is the compressed payload; v_len remains the original size. */
 		'c_len'       => ( $meta && array_key_exists( 'c_len', $meta ) ) ? yac_ocache_format_bytes( $meta['c_len'] ) : null,
 		'size'        => $meta ? yac_ocache_format_bytes( $meta['size'] ) : '—',
 		'ttl'         => $meta ? (int) $meta['ttl'] : 0,
-		'atime'       => ( $meta && array_key_exists( 'atime', $meta ) ) ? (int) $meta['atime'] : null,
-		/* per-entry hits/embedded only exist in newer Yac builds (the
-		   same ones that expose atime); null = not supported here */
-		'hits'        => ( $meta && array_key_exists( 'hits', $meta ) ) ? (int) $meta['hits'] : null,
-		'embedded'    => ( $meta && array_key_exists( 'embedded', $meta ) ) ? (bool) $meta['embedded'] : null,
 		'gone'        => $gone,
 		'content'     => $content,
 		'content_len' => $len,
 		'truncated'   => $truncated,
 	);
+
+	if ( $meta && ( array_key_exists( 'atime', $meta ) || array_key_exists( 'hits', $meta ) || array_key_exists( 'embedded', $meta ) ) ) {
+		$detail['access'] = array();
+		if ( array_key_exists( 'atime', $meta ) ) {
+			$detail['access']['atime'] = (int) $meta['atime'];
+		}
+		if ( array_key_exists( 'hits', $meta ) ) {
+			$detail['access']['hits'] = (int) $meta['hits'];
+		}
+		if ( array_key_exists( 'embedded', $meta ) ) {
+			$detail['access']['embedded'] = (bool) $meta['embedded'];
+		}
+	}
+
+	return $detail;
 }
 
 function yac_ocache_entry_delete( $yac, $key ) {
@@ -1539,8 +1538,7 @@ function yac_ocache_render_admin_page() {
 			<h2><?php echo esc_html( 'Cache status' ); ?></h2>
 			<div class="yac-ocache-panel">
 				<?php
-				$yac_ocache_samples    = yac_ocache_hitrate_samples();
-				$yac_ocache_start_time = ! empty( $yac_ocache_samples ) ? (int) $yac_ocache_samples[0]['start_time'] : 0;
+				$yac_ocache_samples = yac_ocache_hitrate_samples();
 				?>
 				<?php if ( null === $yac_ocache_samples || count( $yac_ocache_samples ) < 1 ) : ?>
 					<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Collecting samples (one per %s, across all workers) — the trend appears once the first sample lands.', yac_ocache_format_uptime( YAC_OCACHE_SAMPLE_INTERVAL ) ) ); ?></p>
@@ -1565,7 +1563,6 @@ function yac_ocache_render_admin_page() {
 							<svg class="yac-ocache-chart" role="img" aria-label="hit rate with selectable hits, misses, and kicks trend lines plus recycle and failure event markers"></svg>
 							<div class="yac-ocache-chart-tip" aria-live="polite" hidden></div>
 						</div>
-						<p class="yac-ocache-note"><?php echo esc_html( sprintf( 'Shared memory running since %s (reset by a flush or restart); a dash means fewer than %s lookups in a bucket.', $yac_ocache_start_time ? date_i18n( 'M j, H:i', $yac_ocache_start_time ) : '—', number_format_i18n( YAC_OCACHE_WINDOW_MIN_LOOKUPS ) ) ); ?></p>
 					</div>
 					<script type="application/json" id="yac-ocache-chart-data"><?php echo wp_json_encode( yac_ocache_chart_data( $yac_ocache_samples, $info ), JSON_HEX_TAG | JSON_HEX_AMP ); // phpcs:ignore WordPress.Security.EscapeOutput -- numeric columns only, hex-flagged for the inline context ?></script>
 				<?php endif; ?>
@@ -1593,7 +1590,7 @@ function yac_ocache_render_admin_page() {
 						<div class="yac-ocache-contents-left">
 							<?php if ( ! empty( $snapshot['groups'] ) ) : ?>
 								<?php
-								$yac_ocache_palette = array( '#2271b1', '#72aee6', '#00a32a', '#dba617', '#d63638', '#787c82', '#996800' );
+								$yac_ocache_palette = array( '#3675b5', '#d86135', '#1b9e77', '#c88f00', '#c56b91', '#238b45', '#6955a3' );
 								$yac_ocache_slices  = array();
 								foreach ( $snapshot['groups'] as $yac_ocache_gi => $yac_ocache_g ) {
 									$yac_ocache_slices[] = array( $yac_ocache_g['label'], $yac_ocache_g['n'], $yac_ocache_g['bytes'], $yac_ocache_palette[ $yac_ocache_gi % 7 ] );

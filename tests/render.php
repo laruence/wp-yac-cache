@@ -275,6 +275,7 @@ check( 'hottest caption names the hit ceiling', strpos( $html, 'top 1,200 hits' 
 check( 'entry inspector modal rendered', strpos( $html, 'yac-ocache-modal' ) !== false );
 check( 'occupied metric uses padded size', strpos( $html, 'Occupied' ) !== false );
 check( 'group pie rendered', strpos( $html, 'yac-ocache-pie' ) !== false );
+check( 'group pie uses the cache status palette', strpos( $html, '#3675b5' ) !== false && strpos( $html, '#d86135' ) !== false && strpos( $html, '#1b9e77' ) !== false );
 check( 'config lists wp-config directives first', strpos( $html, 'WP_CACHE' ) < strpos( $html, 'yac.enable' ) );
 check( 'legacy card row removed', strpos( $html, 'class="yac-ocache-cards' ) === false );
 check( 'legacy values-health panel removed', strpos( $html, 'Values memory health' ) === false );
@@ -284,7 +285,7 @@ check( 'legacy recycle scare removed', strpos( $html, 'Memory pressure' ) === fa
 
 $GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 	'slots_used' => 120,
-	'hits'       => 600,
+	'hits'       => 699,
 	'miss'       => 300,
 ) );
 $GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 120, 'own' => 120 ) );
@@ -292,15 +293,19 @@ $GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 120, '
 $html = render_page();
 
 check( 'warm-up explains the threshold', strpos( $html, 'Warming up — the cache just started' ) !== false );
-check( 'warm-up shows lookups progress', strpos( $html, '(900 so far)' ) !== false );
+check( '999 lookups remain in warm-up', strpos( $html, '(999 so far)' ) !== false );
 check( 'warm-up renders the neutral info advice', strpos( $html, 'yac-ocache-advice-info' ) !== false );
 check( 'warm-up renders no colored verdict advice', strpos( $html, 'class="yac-ocache-advice-warn' ) === false && strpos( $html, 'class="yac-ocache-advice-err' ) === false );
+$warm_chart = yac_ocache_decode_chart_data( $html );
+check( 'chart suppresses health verdicts during warm-up', $warm_chart && false === $warm_chart['healthReady'] );
+check( 'chart omits the shared-memory status note', strpos( $html, 'Shared memory running since' ) === false );
 
 ob_start();
 yac_ocache_render_dashboard_widget();
 $widget_warm = ob_get_clean();
-check( 'widget donut shows N/A while collecting history', strpos( $widget_warm, '>N/A<' ) !== false && strpos( $widget_warm, 'Collecting 24-hour history.' ) !== false );
-check( 'widget never falls back to cumulative counters while unavailable', strpos( $widget_warm, '600 / 300' ) === false && strpos( $widget_warm, '— / —' ) !== false );
+check( 'widget donut shows N/A while collecting history', strpos( $widget_warm, '>N/A<' ) !== false && strpos( $widget_warm, '>collecting history<' ) !== false );
+check( 'widget omits the 24-hour history note', strpos( $widget_warm, 'Collecting 24-hour history' ) === false );
+check( 'widget never falls back to cumulative counters while unavailable', strpos( $widget_warm, '699 / 300' ) === false && strpos( $widget_warm, '— / —' ) !== false );
 check( 'widget shows the warming-up chip', strpos( $widget_warm, 'Warming up' ) !== false );
 
 // --- Scenario 1c: warm-up threshold reached — the verdict starts --------------
@@ -322,6 +327,8 @@ $GLOBALS['yac_ocache_test_samples'] = array(
 $html = render_page();
 
 check( 'verdict starts green once the threshold is reached (no advice on the page)', strpos( $html, 'class="yac-ocache-advice' ) === false );
+$ready_chart = yac_ocache_decode_chart_data( $html );
+check( 'chart enables health verdicts at the warm-up threshold', $ready_chart && true === $ready_chart['healthReady'] );
 
 ob_start();
 yac_ocache_render_dashboard_widget();
@@ -473,6 +480,8 @@ ob_start();
 yac_ocache_render_dashboard_widget();
 $widget_diverged = ob_get_clean();
 check( 'widget shows live entries too', strpos( $widget_diverged, '12,000 / 32,768' ) !== false );
+check( 'widget labels live entries as key slots used', strpos( $widget_diverged, 'Key slots used' ) !== false );
+check( 'widget shows cache uptime', strpos( $widget_diverged, 'Running for' ) !== false && strpos( $widget_diverged, '3 d 4 h' ) !== false );
 
 // --- Scenario 8: drop-in version check -----------------------------------------
 
@@ -520,6 +529,7 @@ ob_start();
 yac_ocache_render_dashboard_widget();
 $widget_html = ob_get_clean();
 check( 'dashboard widget renders hit rate', strpos( $widget_html, 'hit rate' ) !== false );
+check( 'dashboard widget degrades missing uptime gracefully', strpos( $widget_html, 'Running for' ) !== false && strpos( $widget_html, '>—<' ) !== false );
 check( 'dashboard widget links to full dashboard', strpos( $widget_html, 'Full dashboard' ) !== false );
 
 // --- Entry inspector --------------------------------------------------------
@@ -557,13 +567,15 @@ $fake->store['wp:options:alloptions'] = array(
 $d = yac_ocache_entry_detail( $fake, 'wp:options:alloptions' );
 check( 'inspector unwraps drop-in v wrapper', strpos( $d['content'], '"blogname": "Test"' ) !== false );
 check( 'inspector reports never-expiring ttl', 0 === $d['ttl'] );
-check( 'inspector reports missing atime as null', null === $d['atime'] );
+check( 'inspector omits unsupported access metadata', ! array_key_exists( 'access', $d ) );
 check( 'inspector formats sizes', '100 B' === $d['v_len'] || '100 KB' === $d['v_len'] );
 check( 'inspector reports c_len as null for uncompressed entries', null === $d['c_len'] );
 
-$fake->store['wp:options:alloptions']['atime'] = 1234567890;
+$fake->store['wp:options:alloptions']['atime']    = 1234567890;
+$fake->store['wp:options:alloptions']['hits']     = 42;
+$fake->store['wp:options:alloptions']['embedded'] = true;
 $d = yac_ocache_entry_detail( $fake, 'wp:options:alloptions' );
-check( 'inspector passes atime through when the build has it', 1234567890 === $d['atime'] );
+check( 'inspector groups supported access metadata', isset( $d['access'] ) && 1234567890 === $d['access']['atime'] && 42 === $d['access']['hits'] && true === $d['access']['embedded'] );
 
 /* compressed entries (Yac >= 2.4.0 dumps): c_len is the stored compressed
    payload, v_len the original uncompressed length */
