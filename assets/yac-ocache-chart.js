@@ -172,7 +172,8 @@
 		var from = range[ 0 ], to = range[ 1 ];
 		var cfg = VIEWS[ viewName ] || VIEWS.today;
 		var set = data[ cfg.src ];
-		var zeroFill = 'yday' === viewName || 'week' === viewName;
+		var zeroFill = 'today' === viewName || 'yday' === viewName || 'week' === viewName;
+		var fillTo = cfg.live ? Math.min( to, data.now ) : to;
 		if ( ! set || ! set.t || ! set.t.length ) {
 			set = data[ 'min' === cfg.src ? 'hr' : 'min' ];
 		}
@@ -201,7 +202,7 @@
 			};
 		}
 		if ( zeroFill ) {
-			for ( var fill = from; fill < to; fill += step ) {
+			for ( var fill = from; fill < fillTo; fill += step ) {
 				var initial = makeBucket( fill );
 				buckets.push( initial );
 				byTime[ fill ] = initial;
@@ -234,7 +235,7 @@
 				rate: zeroFill && 0 === lookups ? 0 : ( lookups >= threshold ? bucket.h / lookups : null ),
 				h: zeroFill ? bucket.h : ( lookups > 0 ? bucket.h : null ),
 				m: zeroFill ? bucket.m : ( lookups > 0 ? bucket.m : null ),
-				k: bucket.kKnown ? bucket.k : null,
+				k: bucket.kKnown ? bucket.k : ( zeroFill && ! bucket.real ? 0 : null ),
 				f: bucket.fKnown ? bucket.f : null,
 				r: bucket.rKnown ? bucket.r : null,
 				real: bucket.real
