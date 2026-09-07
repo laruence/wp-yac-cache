@@ -242,7 +242,7 @@
 			};
 		} );
 		return {
-			from: from, to: to, pts: pts, step: step,
+			from: from, to: to, end: fillTo, pts: pts, step: step,
 			live: !! cfg.live && set.t.length && set.t[ set.t.length - 1 ] >= from
 		};
 	}
@@ -409,6 +409,10 @@
 				var value = point[ FIELD[ key ] ];
 				return null === value || undefined === value ? null : { x: x( point.t ), y: yOf[ key ]( value ) };
 			} );
+			var tail = nodes[ nodes.length - 1 ];
+			if ( tail && chart.end > pts[ pts.length - 1 ].t ) {
+				nodes.push( { x: x( chart.end ), y: tail.y } );
+			}
 			var last = drawLine( key, nodes );
 			if ( last ) {
 				ends[ key ] = last;
