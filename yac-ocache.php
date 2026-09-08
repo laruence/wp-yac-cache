@@ -1234,14 +1234,7 @@ function yac_ocache_admin_notices() {
 	}
 }
 
-/* one combined dismissible notice for error-level status rows; kept off the
-   plugin's own page (that page shows the same diagnostics in full) */
-function yac_ocache_show_status_notice() {
-	$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
-	if ( $screen && false !== strpos( $screen->id, YAC_OCACHE_ADMIN_PAGE ) ) {
-		return false;
-	}
-
+function yac_ocache_status_errors() {
 	$errors = array();
 	foreach ( yac_ocache_status() as $row ) {
 		if ( 'err' === $row[1] ) {
@@ -1249,6 +1242,18 @@ function yac_ocache_show_status_notice() {
 		}
 	}
 
+	return $errors;
+}
+
+/* one combined dismissible notice for error-level status rows; kept off the
+   plugin's own page (that page shows the same diagnostics in full) */
+function yac_ocache_show_status_notice( &$errors = null ) {
+	$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+	if ( $screen && false !== strpos( $screen->id, YAC_OCACHE_ADMIN_PAGE ) ) {
+		return false;
+	}
+
+	$errors = yac_ocache_status_errors();
 	if ( ! $errors ) {
 		return false;
 	}
@@ -1263,15 +1268,9 @@ function yac_ocache_show_status_notice() {
 }
 
 function yac_ocache_status_notice() {
-	if ( ! yac_ocache_show_status_notice() ) {
+	$errors = null;
+	if ( ! yac_ocache_show_status_notice( $errors ) ) {
 		return;
-	}
-
-	$errors = array();
-	foreach ( yac_ocache_status() as $row ) {
-		if ( 'err' === $row[1] ) {
-			$errors[] = $row[2];
-		}
 	}
 
 	echo '<div class="notice notice-error is-dismissible" id="yac-ocache-status-notice"><p><strong>' . esc_html( 'Yac:' ) . '</strong> ' . wp_kses_post( implode( '<br>', $errors ) ) . '</p>'
@@ -1289,13 +1288,7 @@ function yac_ocache_ajax_dismiss_status_notice() {
 		wp_send_json_error();
 	}
 
-	$errors = array();
-	foreach ( yac_ocache_status() as $row ) {
-		if ( 'err' === $row[1] ) {
-			$errors[] = $row[2];
-		}
-	}
-
+	$errors = yac_ocache_status_errors();
 	update_user_meta( get_current_user_id(), 'yac_ocache_notice_dismissed', md5( implode( "\n", $errors ) ) );
 	wp_send_json_success();
 }
@@ -1367,31 +1360,28 @@ function yac_ocache_entry_delete( $yac, $key ) {
 	return (bool) $yac->delete( $key );
 }
 
-function yac_ocache_ajax_entry() {
+function yac_ocache_ajax_entry_key() {
 	check_ajax_referer( 'yac_ocache_entry' );
 
 	if ( ! current_user_can( 'manage_options' ) || ! yac_ocache_backend_usable() ) {
 		wp_send_json_error();
 	}
+
 	$key = isset( $_POST['key'] ) ? sanitize_text_field( wp_unslash( $_POST['key'] ) ) : '';
 	if ( '' === $key ) {
 		wp_send_json_error();
 	}
 
+	return $key;
+}
+
+function yac_ocache_ajax_entry() {
+	$key = yac_ocache_ajax_entry_key();
 	wp_send_json_success( yac_ocache_entry_detail( new Yac(), $key ) );
 }
 
 function yac_ocache_ajax_entry_delete() {
-	check_ajax_referer( 'yac_ocache_entry' );
-
-	if ( ! current_user_can( 'manage_options' ) || ! yac_ocache_backend_usable() ) {
-		wp_send_json_error();
-	}
-	$key = isset( $_POST['key'] ) ? sanitize_text_field( wp_unslash( $_POST['key'] ) ) : '';
-	if ( '' === $key ) {
-		wp_send_json_error();
-	}
-
+	$key = yac_ocache_ajax_entry_key();
 	wp_send_json_success( array( 'deleted' => yac_ocache_entry_delete( new Yac(), $key ) ) );
 }
 

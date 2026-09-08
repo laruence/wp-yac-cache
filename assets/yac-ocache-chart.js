@@ -51,7 +51,7 @@
 	var state = {
 		view: 'today',
 		on: { hits: true, miss: true, kicks: true, recycles: true, fails: true },
-		pinnedIndex: null
+		pinnedPoint: null
 	};
 
 	function levelOf( rate ) {
@@ -284,7 +284,7 @@
 	}
 
 	function draw() {
-		state.pinnedIndex = null;
+		state.pinnedPoint = null;
 		if ( tip ) {
 			tip.hidden = true;
 		}
@@ -448,7 +448,7 @@
 				mk( 'circle', {
 					cx: ends[ key ].x, cy: ends[ key ].y, r: 3.5,
 					fill: COLORS[ key ], stroke: CHROME.surface, 'stroke-width': 1.5,
-					'class': 'yac-ocache-live'
+					'class': 'yac-ocache-live', 'pointer-events': 'none'
 				} );
 			} );
 		}
@@ -483,30 +483,37 @@
 			}, badge );
 			badge.insertBefore( badgeBack, badgeText );
 		}
-		chartView = { pts: pts, x: x, yOf: yOf, hover: hover, vline: vline, dots: dots, W: W, step: chart.step, to: chart.to };
+		var hoverPoints = pts.map( function( point ) {
+			return { point: point, x: x( point.t ) };
+		} );
+		var lastPoint = pts[ pts.length - 1 ];
+		if ( chart.end > lastPoint.t ) {
+			hoverPoints.push( { point: lastPoint, x: x( chart.end ) } );
+		}
+		chartView = { hoverPoints: hoverPoints, yOf: yOf, hover: hover, vline: vline, dots: dots, W: W, step: chart.step, to: chart.to };
 	}
 
-	function pointIndex( event ) {
+	function nearestPoint( event ) {
 		if ( ! chartView ) {
 			return null;
 		}
 		var rect = svg.getBoundingClientRect();
 		var px = ( event.clientX - rect.left ) / ( rect.width / chartView.W );
-		var best = 0, distance = Infinity;
-		chartView.pts.forEach( function( point, index ) {
-			var next = Math.abs( chartView.x( point.t ) - px );
+		var best = null, distance = Infinity;
+		chartView.hoverPoints.forEach( function( candidate ) {
+			var next = Math.abs( candidate.x - px );
 			if ( next < distance ) {
 				distance = next;
-				best = index;
+				best = candidate;
 			}
 		} );
 		return best;
 	}
-	function showPoint( index, event ) {
-		if ( null === index || ! chartView || ! tip ) {
+	function showPoint( target, event ) {
+		if ( ! target || ! chartView || ! tip ) {
 			return;
 		}
-		var point = chartView.pts[ index ], px = chartView.x( point.t );
+		var point = target.point, px = target.x;
 		chartView.hover.style.display = '';
 		chartView.vline.setAttribute( 'x1', px );
 		chartView.vline.setAttribute( 'x2', px );
@@ -557,30 +564,30 @@
 		if ( 'mouse' !== event.pointerType ) {
 			return;
 		}
-		var index = pointIndex( event );
-		showPoint( index, event );
-		if ( null !== state.pinnedIndex ) {
-			state.pinnedIndex = index;
+		var target = nearestPoint( event );
+		showPoint( target, event );
+		if ( null !== state.pinnedPoint ) {
+			state.pinnedPoint = target;
 		}
 	} );
 	svg.addEventListener( 'pointerleave', function() {
-		if ( null === state.pinnedIndex ) {
+		if ( null === state.pinnedPoint ) {
 			hidePoint();
 		}
 	} );
 	svg.addEventListener( 'click', function( event ) {
 		var lineHit = event.target.closest && event.target.closest( '[data-yac-line-hit]' );
 		if ( ! lineHit ) {
-			state.pinnedIndex = null;
+			state.pinnedPoint = null;
 			hidePoint();
 			return;
 		}
-		state.pinnedIndex = pointIndex( event );
-		showPoint( state.pinnedIndex, event );
+		state.pinnedPoint = nearestPoint( event );
+		showPoint( state.pinnedPoint, event );
 	} );
 	svg.addEventListener( 'keydown', function( event ) {
 		if ( 'Escape' === event.key ) {
-			state.pinnedIndex = null;
+			state.pinnedPoint = null;
 			hidePoint();
 		}
 	} );

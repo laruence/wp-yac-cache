@@ -388,25 +388,7 @@ class Yac_Ocache_Object_Cache {
 	}
 
 	public function decr( $id, $n = 1, $group = 'default' ) {
-		$key   = $this->key( $id, $group );
-		$value = $this->get( $id, $group, false, $found );
-
-		if ( ! $found ) {
-			return false;
-		}
-		if ( ! is_numeric( $value ) ) {
-			$value = 0;
-		}
-
-		$result = (int) $value - (int) $n;
-		if ( $result < 0 ) {
-			$result = 0;
-		}
-
-		$this->set( $id, $result, $group );
-		$this->cache[ $key ]['value'] = $result;
-
-		return $result;
+		return $this->incr( $id, -(int) $n, $group );
 	}
 
 	public function close() {
@@ -491,7 +473,7 @@ class Yac_Ocache_Object_Cache {
 		}
 
 		if ( in_array( $group, $this->non_persistent_groups, true ) || ! $this->yac_available ) {
-			$this->cache[ $key ] = array( 'value' => false, 'found' => false, 'group' => $this->sanitize_group( $group ) );
+			$this->set_internal_cache( $key, false, $this->sanitize_group( $group ), false );
 			$found = false;
 
 			$this->group_ops_stats( 'get_local', $key, $group, null, null, 'not_in_local' );
@@ -517,7 +499,7 @@ class Yac_Ocache_Object_Cache {
 			$value = false;
 		}
 
-		$this->cache[ $key ] = array( 'value' => $value, 'found' => $found, 'group' => $this->sanitize_group( $group ) );
+		$this->set_internal_cache( $key, $value, $this->sanitize_group( $group ), $found );
 
 		if ( ! $found ) {
 			$this->group_ops_stats( 'get', $key, $group, null, $elapsed, 'not_in_yac' );
@@ -544,7 +526,7 @@ class Yac_Ocache_Object_Cache {
 
 				if ( in_array( $group, $this->non_persistent_groups, true ) || ! $this->yac_available ) {
 					$return[ $key ] = false;
-					$this->cache[ $key ] = array( 'value' => false, 'found' => false, 'group' => $this->sanitize_group( $group ) );
+					$this->set_internal_cache( $key, false, $this->sanitize_group( $group ), false );
 					continue;
 				}
 
@@ -554,7 +536,7 @@ class Yac_Ocache_Object_Cache {
 
 				if ( false === $raw ) {
 					$return[ $key ] = false;
-					$this->cache[ $key ] = array( 'value' => false, 'found' => false, 'group' => $this->sanitize_group( $group ) );
+					$this->set_internal_cache( $key, false, $this->sanitize_group( $group ), false );
 					$this->group_ops_stats( 'get', $key, $group, null, $elapsed, 'not_in_yac' );
 				} else {
 					$value = $raw;
@@ -562,7 +544,7 @@ class Yac_Ocache_Object_Cache {
 						$value = false;
 					}
 					$return[ $key ] = is_object( $value ) ? clone $value : $value;
-					$this->cache[ $key ] = array( 'value' => $value, 'found' => true, 'group' => $this->sanitize_group( $group ) );
+					$this->set_internal_cache( $key, $value, $this->sanitize_group( $group ), true );
 					$this->group_ops_stats( 'get', $key, $group, $this->get_data_size( $value ), $elapsed, 'yac' );
 				}
 			}
@@ -608,7 +590,7 @@ class Yac_Ocache_Object_Cache {
 		   fall back to the sentinel plus the request-level cache. */
 		if ( ! $this->yac_key_exists( $key ) ) {
 			if ( ! isset( $this->cache[ $key ] ) || ! $this->cache[ $key ]['found'] ) {
-				$this->cache[ $key ] = array( 'value' => false, 'found' => false, 'group' => $this->sanitize_group( $group ) );
+				$this->set_internal_cache( $key, false, $this->sanitize_group( $group ), false );
 				return false;
 			}
 		}
@@ -627,7 +609,7 @@ class Yac_Ocache_Object_Cache {
 			$data = 0; /* Yac::get() cannot tell a stored false from a miss */
 		}
 
-		$this->cache[ $key ] = array( 'value' => $data, 'found' => false, 'group' => $this->sanitize_group( $group ) );
+		$this->set_internal_cache( $key, $data, $this->sanitize_group( $group ), false );
 
 		if ( in_array( $group, $this->non_persistent_groups, true ) || ! $this->yac_available ) {
 			$this->cache[ $key ]['found'] = true;
@@ -737,16 +719,20 @@ class Yac_Ocache_Object_Cache {
 		return $expire < 0 ? 0 : $expire;
 	}
 
+	private function set_internal_cache( $key, $value, $group, $found ) {
+		$this->cache[ $key ] = array(
+			'value' => $value,
+			'found' => $found,
+			'group' => $group,
+		);
+	}
+
 	private function add_to_internal_cache( $key, $value, $group = 'default' ) {
 		if ( is_object( $value ) ) {
 			$value = clone $value;
 		}
 
-		$this->cache[ $key ] = array(
-			'value' => $value,
-			'found' => true,
-			'group' => $group,
-		);
+		$this->set_internal_cache( $key, $value, $group, true );
 	}
 
 	public function stats() {
