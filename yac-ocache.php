@@ -1293,20 +1293,47 @@ function yac_ocache_ajax_dismiss_status_notice() {
 	wp_send_json_success();
 }
 
-/* Entry details combine Yac::dump() metadata with the deserialized value.
- * Optional access metadata is omitted when the Yac build does not expose it. */
-function yac_ocache_entry_detail( $yac, $key ) {
-	$meta = null;
-	$dump = yac_ocache_dump_all( $yac );
-	if ( is_array( $dump ) ) {
-		foreach ( $dump as $it ) {
-			if ( isset( $it['key'] ) && $it['key'] === $key ) {
-				$meta = $it;
-				break;
+/* Find one entry without accumulating the entire dump in PHP memory. */
+function yac_ocache_dump_entry( $yac, $key, $page_size = 100, $supports_offset = null ) {
+	if ( null === $supports_offset ) {
+		$supports_offset = defined( 'YAC_VERSION' ) && version_compare( YAC_VERSION, '2.4.0', '>=' );
+	}
+	if ( $supports_offset ) {
+		$offset = 0;
+		for ( ;; ) {
+			$page = $yac->dump( $page_size, $offset );
+			if ( ! is_array( $page ) || 0 === count( $page ) ) {
+				return null;
 			}
+			foreach ( $page as $entry ) {
+				if ( isset( $entry['key'] ) && $entry['key'] === $key ) {
+					return $entry;
+				}
+			}
+			$count = count( $page );
+			if ( $count < $page_size ) {
+				return null;
+			}
+			$offset += $count;
 		}
 	}
 
+	/* Older Yac releases have no offset argument. */
+	$entries = $yac->dump( -1 );
+	if ( is_array( $entries ) ) {
+		foreach ( $entries as $entry ) {
+			if ( isset( $entry['key'] ) && $entry['key'] === $key ) {
+				return $entry;
+			}
+		}
+	}
+	return null;
+}
+
+/* Entry details combine Yac::dump() metadata with the deserialized value.
+ * Optional access metadata is omitted when the Yac build does not expose it. */
+function yac_ocache_entry_detail( $yac, $key ) {
+	$meta  = yac_ocache_dump_entry( $yac, $key );
 	$value = $yac->get( $key );
 	if ( is_array( $value ) && 1 === count( $value ) && array_key_exists( 'v', $value ) ) {
 		$value = $value['v']; // unwrap the drop-in's miss-vs-false wrapper

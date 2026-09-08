@@ -553,13 +553,15 @@ check( 'dashboard widget links to full dashboard', strpos( $widget_html, 'Full d
 
 class Fake_Yac {
 	public $store = array();
-	public function dump( $limit = 100 ) {
+	public $dump_calls = array();
+	public function dump( $limit = 100, $offset = 0 ) {
+		$this->dump_calls[] = array( $limit, $offset );
 		$out = array();
 		foreach ( $this->store as $k => $m ) {
 			$m['key'] = $k;
 			$out[]    = $m;
 		}
-		return $out;
+		return array_slice( $out, $offset, $limit );
 	}
 	public function get( $k ) {
 		return isset( $this->store[ $k ] ) ? $this->store[ $k ]['value'] : false;
@@ -572,6 +574,28 @@ class Fake_Yac {
 		return false;
 	}
 }
+
+$paged = new Fake_Yac();
+for ( $i = 0; $i < 100; $i++ ) {
+	$paged->store['filler:' . $i] = array( 'value' => $i, 'v_len' => 1, 'size' => 16, 'ttl' => 0 );
+}
+$paged->store['wp:target'] = array( 'value' => 'target', 'v_len' => 6, 'size' => 16, 'ttl' => 0 );
+$paged->store['after:target'] = array( 'value' => 'after', 'v_len' => 5, 'size' => 16, 'ttl' => 0 );
+$meta = yac_ocache_dump_entry( $paged, 'wp:target', 100, true );
+check( 'inspector scans dump in 100-entry pages', isset( $meta['key'] ) && 'wp:target' === $meta['key'] );
+check( 'inspector stops paging after target match', array( array( 100, 0 ), array( 100, 100 ) ) === $paged->dump_calls );
+
+class Fake_Legacy_Yac {
+	public $dump_limits = array();
+	public function dump( $limit = 100 ) {
+		$this->dump_limits[] = $limit;
+		return array( array( 'key' => 'wp:legacy', 'v_len' => 6, 'size' => 16, 'ttl' => 0 ) );
+	}
+}
+
+$legacy      = new Fake_Legacy_Yac();
+$legacy_meta = yac_ocache_dump_entry( $legacy, 'wp:legacy', 100, false );
+check( 'legacy inspector uses one full dump without offset', isset( $legacy_meta['key'] ) && array( -1 ) === $legacy->dump_limits );
 
 $fake = new Fake_Yac();
 $fake->store['wp:options:alloptions'] = array(
