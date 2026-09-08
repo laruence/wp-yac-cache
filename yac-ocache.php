@@ -1514,15 +1514,23 @@ function yac_ocache_render_admin_page() {
 
 
 
-			if ( 'green' !== $health['verdict'] ) {
+			$yac_ocache_advice = array(
+				'yac-ocache-advice-info',
+				'i',
+				$snapshot
+					? sprintf( 'No capacity pressure detected (keys %1$.1f%%, values %2$.1f%%). Low hit rate alone does not justify more memory.', $health['keys_pct'], $health['vals_pct'] )
+					: 'No live memory snapshot. Check Yac status and miss/kick trends before resizing.',
+			);
+			if ( 'green' !== $health['verdict'] && 'warmup' !== $health['verdict'] ) {
 				$yac_ocache_advices = array(
-					'keys'        => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Key slots full and hit rate below 90%% — entries are being kicked before re-read. Raise <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
-					'keys-strong' => array( 'yac-ocache-advice-err', '✗', sprintf( 'Key slots full and hit rate below 70%% — the cache is thrashing and requests fall through to the database. Strongly raise <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
-					'values'      => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Keys not full but values full — the current entries occupy more than the values pool and get ring-overwritten before re-read. Raise <code>yac.values_memory_size</code> (currently %s).', esc_html( yac_ocache_format_bytes( $values_total ) ) ) ),
-					'distribution'=> array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Kicks are %1$.1f%% of inserts vs ≈%2$.1f%% expected under uniform hashing — the placement is unlucky or the slot table too small for the churn. Change <code>YAC_OCACHE_KEY_PREFIX</code> to re-roll the layout (costs one cold start), or raise <code>yac.keys_memory_size</code> (a new mask re-spreads the keys too).', $health['kick_obs'], $health['kick_exp'] ) ),
-					'keys-early'  => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Key slots are not full but the hit rate is under 90%% and a third or more of misses are eviction-driven — slot pressure arrives early. Raise <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
-					'foreign'     => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Only %1$.0f%% of the slotted entries belong to this install — the slot pressure is shared-pool occupancy from other Yac users on this machine. Raise <code>yac.keys_memory_size</code> or run a separate pool.', 100 - $health['foreign_pct'] ) ),
+					'keys'         => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Key slots are full and evictions reduce the hit rate. Increase <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
+					'keys-strong'  => array( 'yac-ocache-advice-err', '✗', sprintf( 'Cache thrashing: key slots are full and hit rate is below 70%%. Increase <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
+					'values'       => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Values memory is full and entries are being overwritten. Increase <code>yac.values_memory_size</code> (currently %s).', esc_html( yac_ocache_format_bytes( $values_total ) ) ) ),
+					'distribution' => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Kicks are %1$.1f%% of inserts vs ≈%2$.1f%% expected. Change <code>YAC_OCACHE_KEY_PREFIX</code> or increase <code>yac.keys_memory_size</code>.', $health['kick_obs'], $health['kick_exp'] ) ),
+					'keys-early'   => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Evictions cause at least a third of misses. Increase <code>yac.keys_memory_size</code> (currently %s).', esc_html( ini_get( 'yac.keys_memory_size' ) ) ) ),
+					'foreign'      => array( 'yac-ocache-advice-warn', '⚠', sprintf( 'Only %1$.0f%% of entries belong to this site. Increase <code>yac.keys_memory_size</code> or use a separate pool.', 100 - $health['foreign_pct'] ) ),
 				);
+				$yac_ocache_advice = $yac_ocache_advices[ $health['advice'] ];
 			}
 			?>
 			<h2><?php echo esc_html( 'Cache status' ); ?></h2>
@@ -1552,6 +1560,14 @@ function yac_ocache_render_admin_page() {
 						<div class="yac-ocache-chart-wrap">
 							<svg class="yac-ocache-chart" role="img" aria-label="hit rate with selectable hits, misses, and kicks trend lines plus recycle and failure event markers"></svg>
 							<div class="yac-ocache-chart-tip" aria-live="polite" hidden></div>
+							<div id="yac-ocache-health-popover" class="yac-ocache-health-popover" role="dialog" aria-labelledby="yac-ocache-health-title" hidden>
+								<strong id="yac-ocache-health-title"><?php echo esc_html( 'Cache health' ); ?></strong>
+								<p class="yac-ocache-health-range" data-yac-health-range></p>
+								<div class="yac-ocache-health-diagnosis <?php echo esc_attr( $yac_ocache_advice[0] ); ?>">
+									<span aria-hidden="true"><?php echo esc_html( $yac_ocache_advice[1] ); ?></span>
+									<div><?php echo wp_kses_post( $yac_ocache_advice[2] ); ?></div>
+								</div>
+							</div>
 						</div>
 					</div>
 					<script type="application/json" id="yac-ocache-chart-data"><?php echo wp_json_encode( yac_ocache_chart_data( $yac_ocache_samples, $info ), JSON_HEX_TAG | JSON_HEX_AMP ); // phpcs:ignore WordPress.Security.EscapeOutput -- numeric columns only, hex-flagged for the inline context ?></script>
@@ -1563,8 +1579,7 @@ function yac_ocache_render_admin_page() {
 						<div><?php echo esc_html( sprintf( 'Warming up — the cache just started and early lookups are compulsory first reads, so no verdict yet. Health metrics start after the first %s lookups (%s so far).', number_format_i18n( YAC_OCACHE_WARMUP_LOOKUPS ), number_format_i18n( $health['lookups'] ) ) ); ?></div>
 					</div>
 				<?php elseif ( '' !== $health['advice'] ) : ?>
-					<?php $yac_ocache_advice = $yac_ocache_advices[ $health['advice'] ]; ?>
-					<div class="yac-ocache-advice <?php echo esc_attr( $yac_ocache_advice[0] ); ?>">
+					<div class="yac-ocache-advice <?php echo esc_attr( $yac_ocache_advice[0] ); ?>" data-yac-health-fallback>
 						<span><?php echo esc_html( $yac_ocache_advice[1] ); ?></span>
 						<div><?php echo wp_kses_post( $yac_ocache_advice[2] ); ?></div>
 					</div>

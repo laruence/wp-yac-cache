@@ -9,7 +9,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-FILES=(yac-ocache.php object-cache.php readme.txt LICENSE assets/yac-ocache.css assets/yac-ocache-notice.js assets/yac-ocache-admin.js)
+FILES=(yac-ocache.php object-cache.php readme.txt LICENSE assets/yac-ocache.css assets/yac-ocache-notice.js assets/yac-ocache-chart.js assets/yac-ocache-admin.js)
 OUT="${1:-dist/yac-obj-cache.zip}"
 
 for f in "${FILES[@]}"; do

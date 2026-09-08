@@ -19,6 +19,12 @@
 
 	var wrap = svg.parentNode;
 	var tip  = wrap.querySelector( '.yac-ocache-chart-tip' );
+	var healthPopover = wrap.querySelector( '.yac-ocache-health-popover' );
+	var healthRange = healthPopover ? healthPopover.querySelector( '[data-yac-health-range]' ) : null;
+	var healthFallback = document.querySelector( '[data-yac-health-fallback]' );
+	var healthBadge = null;
+	var healthPinned = false;
+	var healthCloseTimer = 0;
 	var cards = {};
 	document.querySelectorAll( '.yac-ocache-metric[data-yac-series]' ).forEach( function( card ) {
 		cards[ card.getAttribute( 'data-yac-series' ) ] = card;
@@ -56,6 +62,84 @@
 
 	function levelOf( rate ) {
 		return rate >= 0.9 ? 'healthy' : rate >= 0.7 ? 'warning' : 'critical';
+	}
+	function rangeLabel() {
+		return { today: 'Today', yday: 'Yesterday', week: 'Last 7 days' }[ state.view ] || 'Selected range';
+	}
+	function cancelHealthClose() {
+		window.clearTimeout( healthCloseTimer );
+		healthCloseTimer = 0;
+	}
+	function positionHealthPopover() {
+		if ( ! healthPopover || healthPopover.hidden || ! healthBadge ) {
+			return;
+		}
+		var badgeRect = healthBadge.getBoundingClientRect();
+		var wrapRect = wrap.getBoundingClientRect();
+		var left = badgeRect.right - wrapRect.left - healthPopover.offsetWidth;
+		left = Math.max( 4, Math.min( left, wrapRect.width - healthPopover.offsetWidth - 4 ) );
+		healthPopover.style.left = left + 'px';
+		healthPopover.style.top = Math.max( 4, badgeRect.bottom - wrapRect.top + 7 ) + 'px';
+	}
+	function showHealthPopover() {
+		if ( ! healthPopover || ! healthBadge ) {
+			return;
+		}
+		cancelHealthClose();
+		state.pinnedPoint = null;
+		hidePoint();
+		healthPopover.hidden = false;
+		healthBadge.setAttribute( 'aria-expanded', 'true' );
+		positionHealthPopover();
+	}
+	function closeHealthPopover( force ) {
+		if ( healthPinned && ! force ) {
+			return;
+		}
+		cancelHealthClose();
+		if ( healthPopover ) {
+			healthPopover.hidden = true;
+		}
+		if ( healthBadge ) {
+			healthBadge.setAttribute( 'aria-expanded', 'false' );
+		}
+		if ( force ) {
+			healthPinned = false;
+		}
+	}
+	function scheduleHealthClose() {
+		cancelHealthClose();
+		healthCloseTimer = window.setTimeout( function() {
+			closeHealthPopover( false );
+		}, 120 );
+	}
+	function bindHealthBadge( badge ) {
+		healthBadge = badge;
+		if ( healthFallback ) {
+			healthFallback.hidden = true;
+		}
+		badge.addEventListener( 'pointerenter', showHealthPopover );
+		badge.addEventListener( 'pointerleave', scheduleHealthClose );
+		badge.addEventListener( 'focus', showHealthPopover );
+		badge.addEventListener( 'blur', scheduleHealthClose );
+		badge.addEventListener( 'click', function( event ) {
+			event.stopPropagation();
+			healthPinned = ! healthPinned;
+			if ( healthPinned ) {
+				showHealthPopover();
+			} else {
+				closeHealthPopover( true );
+			}
+		} );
+		badge.addEventListener( 'keydown', function( event ) {
+			if ( 'Enter' === event.key || ' ' === event.key ) {
+				event.preventDefault();
+				badge.dispatchEvent( new MouseEvent( 'click', { bubbles: true } ) );
+			} else if ( 'Escape' === event.key ) {
+				event.preventDefault();
+				closeHealthPopover( true );
+			}
+		} );
 	}
 	function setCard( key, text ) {
 		if ( cards[ key ] ) {
@@ -285,6 +369,11 @@
 
 	function draw() {
 		state.pinnedPoint = null;
+		closeHealthPopover( true );
+		healthBadge = null;
+		if ( healthFallback ) {
+			healthFallback.hidden = false;
+		}
 		if ( tip ) {
 			tip.hidden = true;
 		}
@@ -463,14 +552,19 @@
 
 		if ( averageBadge ) {
 			var averageStatus = averageBadge.status;
-			var badge = mk( 'g', { 'aria-hidden': 'true', 'pointer-events': 'none' } );
+			var badge = mk( 'g', {
+				'role': 'button', 'tabindex': '0', 'data-yac-health-badge': '',
+				'aria-controls': 'yac-ocache-health-popover', 'aria-expanded': 'false',
+				'aria-label': averageStatus.label + ' cache health, ' + ( averageBadge.rate * 100 ).toFixed( 1 ) + ' percent. Show details.',
+				'class': 'yac-ocache-health-badge'
+			} );
 			var badgeHeight = 17;
 			var badgeTop = averageBadge.y - badgeHeight / 2;
 			var badgeText = txt(
 				0,
 				averageBadge.y + 3.5,
 				averageStatus.icon + ' ' + averageStatus.label + ' · ' + ( averageBadge.rate * 100 ).toFixed( 1 ) + '%',
-				{ style: 'fill:' + averageStatus.color, 'font-weight': 500 },
+				{ style: 'fill:' + averageStatus.color, 'font-weight': 500, 'pointer-events': 'none' },
 				badge
 			);
 			var badgeWidth = Math.ceil( badgeText.getComputedTextLength() ) + 12;
@@ -479,9 +573,13 @@
 			var badgeBack = mk( 'rect', {
 				x: badgeX, y: badgeTop, width: badgeWidth, height: badgeHeight,
 				rx: 3, fill: averageStatus.tint, stroke: averageStatus.color,
-				'stroke-width': 0.75
+				'stroke-width': 0.75, 'pointer-events': 'all'
 			}, badge );
 			badge.insertBefore( badgeBack, badgeText );
+			if ( healthRange ) {
+				healthRange.textContent = rangeLabel() + ' · ' + ( averageBadge.rate * 100 ).toFixed( 1 ) + '% · ' + averageStatus.label;
+			}
+			bindHealthBadge( badge );
 		}
 		var hoverPoints = pts.map( function( point ) {
 			return { point: point, x: x( point.t ) };
@@ -490,7 +588,10 @@
 		if ( chart.end > lastPoint.t ) {
 			hoverPoints.push( { point: lastPoint, x: x( chart.end ) } );
 		}
-		chartView = { hoverPoints: hoverPoints, yOf: yOf, hover: hover, vline: vline, dots: dots, W: W, step: chart.step, to: chart.to };
+		chartView = {
+			hoverPoints: hoverPoints, yOf: yOf, hover: hover, vline: vline, dots: dots,
+			W: W, step: chart.step, to: chart.to, hoverEndX: x( chart.end )
+		};
 	}
 
 	function nearestPoint( event ) {
@@ -499,6 +600,9 @@
 		}
 		var rect = svg.getBoundingClientRect();
 		var px = ( event.clientX - rect.left ) / ( rect.width / chartView.W );
+		if ( px > chartView.hoverEndX ) {
+			return null;
+		}
 		var best = null, distance = Infinity;
 		chartView.hoverPoints.forEach( function( candidate ) {
 			var next = Math.abs( candidate.x - px );
@@ -561,10 +665,16 @@
 	}
 
 	svg.addEventListener( 'pointermove', function( event ) {
-		if ( 'mouse' !== event.pointerType ) {
+		if ( 'mouse' !== event.pointerType || event.target.closest( '[data-yac-health-badge]' ) || healthPopover && ! healthPopover.hidden ) {
 			return;
 		}
 		var target = nearestPoint( event );
+		if ( ! target ) {
+			if ( null === state.pinnedPoint ) {
+				hidePoint();
+			}
+			return;
+		}
 		showPoint( target, event );
 		if ( null !== state.pinnedPoint ) {
 			state.pinnedPoint = target;
@@ -589,6 +699,21 @@
 		if ( 'Escape' === event.key ) {
 			state.pinnedPoint = null;
 			hidePoint();
+		}
+	} );
+
+	if ( healthPopover ) {
+		healthPopover.addEventListener( 'pointerenter', cancelHealthClose );
+		healthPopover.addEventListener( 'pointerleave', scheduleHealthClose );
+	}
+	document.addEventListener( 'click', function( event ) {
+		if ( healthPopover && ! healthPopover.contains( event.target ) ) {
+			closeHealthPopover( true );
+		}
+	} );
+	document.addEventListener( 'keydown', function( event ) {
+		if ( 'Escape' === event.key ) {
+			closeHealthPopover( true );
 		}
 	} );
 

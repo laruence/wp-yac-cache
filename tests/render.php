@@ -255,6 +255,8 @@ $GLOBALS['yac_ocache_test_samples']  = fake_samples();
 $html = render_page();
 
 check( 'trend chart rendered', strpos( $html, 'yac-ocache-chart' ) !== false );
+check( 'health details popover is rendered hidden and labelled', strpos( $html, 'id="yac-ocache-health-popover"' ) !== false && strpos( $html, 'role="dialog"' ) !== false && strpos( $html, 'aria-labelledby="yac-ocache-health-title"' ) !== false && strpos( $html, 'data-yac-health-range' ) !== false );
+check( 'healthy diagnosis does not infer memory pressure from hit rate alone', strpos( $html, 'Low hit rate alone does not justify more memory.' ) !== false );
 check( 'range control offers today/yesterday/week', strpos( $html, 'data-yac-range="today"' ) !== false && strpos( $html, 'data-yac-range="yday"' ) !== false && strpos( $html, 'data-yac-range="week"' ) !== false );
 check( 'metrics row carries the rate and five selectable counters', strpos( $html, 'data-yac-series="rate"' ) !== false && strpos( $html, 'data-yac-series="hits"' ) !== false && strpos( $html, 'data-yac-series="miss"' ) !== false && strpos( $html, 'data-yac-series="kicks"' ) !== false && strpos( $html, 'data-yac-series="fails"' ) !== false && strpos( $html, 'data-yac-series="recycles"' ) !== false );
 check( 'count metric selectors use pressed button semantics', substr_count( $html, 'class="yac-ocache-metric is-selected"' ) === 5 && substr_count( $html, 'aria-pressed="true"' ) >= 5 );
@@ -361,7 +363,7 @@ $GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 30100,
 
 $html = render_page();
 
-check( 'keys advice shown', strpos( $html, 'Key slots full and hit rate below 90' ) !== false );
+check( 'keys advice shown', strpos( $html, 'Key slots are full and evictions reduce the hit rate' ) !== false );
 check( 'keys-full renders the warn advice block', strpos( $html, 'yac-ocache-advice-warn' ) !== false );
 
 ob_start();
@@ -380,7 +382,7 @@ $GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
 
 $html = render_page();
 
-check( 'strong keys advice shown', strpos( $html, 'Strongly raise' ) !== false );
+check( 'strong keys advice shown', strpos( $html, 'Cache thrashing' ) !== false && strpos( $html, 'yac.keys_memory_size' ) !== false );
 check( 'red advice style', strpos( $html, 'yac-ocache-advice-err' ) !== false );
 
 ob_start();
@@ -400,7 +402,22 @@ $GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'occupied' => 64000
 
 $html = render_page();
 
-check( 'values-full advice shown', strpos( $html, 'Keys not full but values full' ) !== false );
+check( 'values-full advice shown', strpos( $html, 'Values memory is full' ) !== false && strpos( $html, 'yac.values_memory_size' ) !== false );
+
+// --- Scenario 4b: many recycles alone are not evidence of memory pressure -----
+
+$GLOBALS['yac_ocache_test_storage_info'] = fake_info( array(
+	'slots_used' => 1262,
+	'hits'       => 95000,
+	'miss'       => 5000,
+	'recycles'   => 8000,
+) );
+$GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'occupied' => 26000000 ) );
+
+$html = render_page();
+
+check( 'recycles alone do not trigger values-memory advice', strpos( $html, 'Values memory is full' ) === false && strpos( $html, 'Increase <code>yac.values_memory_size</code>' ) === false );
+check( 'recycles alone retain the no-capacity-pressure diagnosis', strpos( $html, 'No capacity pressure detected' ) !== false );
 
 // --- Scenario 5: keys 49%, kicks far above uniform expectation, rate < 90 ----
 // inserts = 16000 + 3000 = 19000, observed = 15.8%, expected = 0.488^4/5 ~= 1.1%
@@ -415,7 +432,7 @@ $GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 16000,
 
 $html = render_page();
 
-check( 'distribution anomaly advice shown', strpos( $html, 'placement is unlucky' ) !== false );
+check( 'distribution anomaly advice shown', strpos( $html, 'Kicks are' ) !== false );
 check( 'distribution advice offers prefix re-roll', strpos( $html, 'YAC_OCACHE_KEY_PREFIX' ) !== false );
 check( 'distribution advice offers more slots too', strpos( $html, 'yac.keys_memory_size' ) !== false );
 
@@ -446,7 +463,7 @@ $GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 26214,
 
 $html = render_page();
 
-check( 'early slot pressure advice shown', strpos( $html, 'slot pressure arrives early' ) !== false );
+check( 'early slot pressure advice shown', strpos( $html, 'Evictions cause at least a third of misses' ) !== false );
 
 // --- Scenario 7: mostly foreign entries — shared-pool occupancy ----------------
 
@@ -459,7 +476,7 @@ $GLOBALS['yac_ocache_test_snapshot'] = fake_snapshot( array( 'entries' => 20000,
 
 $html = render_page();
 
-check( 'shared-pool advice shown', strpos( $html, 'shared-pool occupancy' ) !== false );
+check( 'shared-pool advice shown', strpos( $html, 'Only 30% of entries belong to this site' ) !== false );
 
 // --- Scenario 7b: slots_used high-water vs live entries ------------------------
 // Health uses live entries because slots_used includes expired entries.

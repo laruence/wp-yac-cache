@@ -8,6 +8,7 @@
 	.yac-ocache-donut-pct { font-size: 22px; font-weight: 600; fill: #1d2327; text-anchor: middle; }
 	.yac-ocache-donut-sub { font-size: 9px; fill: #646970; text-anchor: middle; }
 	.yac-ocache-advice { display: flex; gap: 10px; border-radius: 8px; padding: 12px 14px; margin: 14px 0 0; font-size: 13px; line-height: 1.6; }
+	.yac-ocache-advice[hidden] { display: none; }
 	.yac-ocache-advice-warn { background: #fcf9e8; border: 1px solid #f0e1a0; color: #8a6d00; }
 	.yac-ocache-advice strong { display: block; }
 	.yac-ocache-actions { margin-top: 18px; }
@@ -119,6 +120,16 @@
 	.yac-ocache-chart-tip .row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
 	.yac-ocache-chart-tip .row i { width: 10px; height: 3px; border-radius: 2px; flex: none; }
 	.yac-ocache-chart-tip .row b { margin-left: auto; padding-left: 18px; color: var(--yac-chart-ink); font-weight: 500; }
+	.yac-ocache-health-badge { cursor: pointer; outline: none; }
+	.yac-ocache-health-badge:hover rect, .yac-ocache-health-badge:focus-visible rect { stroke-width: 1.5; }
+	.yac-ocache-health-badge:focus-visible rect { stroke: #0f62fe; }
+	.yac-ocache-health-popover { position: absolute; z-index: 20; box-sizing: border-box; width: min(340px, calc(100% - 8px)); padding: 10px; color: var(--yac-chart-ink); background: rgba(252, 252, 251, .99); border: 1px solid var(--yac-chart-border); border-radius: 6px; box-shadow: 0 6px 20px rgba(22, 22, 22, .18); font-size: 12px; line-height: 1.4; }
+	.yac-ocache-health-popover[hidden] { display: none; }
+	.yac-ocache-health-popover > strong { display: block; font-size: 12px; font-weight: 600; }
+	.yac-ocache-health-range { margin: 1px 0 0; color: var(--yac-chart-muted); }
+	.yac-ocache-health-diagnosis { display: flex; gap: 7px; margin: 7px 0 0; padding: 8px 9px; border-radius: 5px; }
+	.yac-ocache-health-diagnosis > span { flex: none; font-weight: 600; }
+	.yac-ocache-health-diagnosis code { white-space: nowrap; }
 	.yac-ocache-advice-warn { background: #fff8db; border-color: #ead58b; color: var(--yac-attention); }
 	.yac-ocache-advice-err { background: #fff1f1; border: 1px solid #f1aeb5; color: var(--yac-critical); }
 	.yac-ocache-advice-info { background: var(--yac-chart-subtle); border: 1px solid var(--yac-chart-border); color: var(--yac-warmup); }

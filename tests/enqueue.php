@@ -98,8 +98,10 @@ check( 'admin JS NOT enqueued off the plugin page', ! isset( $GLOBALS['yac_ocach
 $GLOBALS['yac_ocache_screen'] = (object) array( 'id' => 'tools_page_yac-ocache' );
 yac_ocache_admin_enqueue_scripts( 'tools.php' );
 check( 'admin CSS enqueued on the plugin page', isset( $GLOBALS['yac_ocache_enq']['styles']['yac-ocache-admin'] ) );
+check( 'chart JS enqueued on the plugin page', isset( $GLOBALS['yac_ocache_enq']['scripts']['yac-ocache-chart'] ) );
 check( 'admin JS enqueued on the plugin page', isset( $GLOBALS['yac_ocache_enq']['scripts']['yac-ocache-admin'] ) );
 check( 'asset URLs use YAC_OCACHE_PLUGIN_URL', 0 === strpos( $GLOBALS['yac_ocache_enq']['styles']['yac-ocache-admin']['src'], YAC_OCACHE_PLUGIN_URL . 'assets/' ) );
+check( 'chart JS uses its file timestamp for cache busting', filemtime( __DIR__ . '/../assets/yac-ocache-chart.js' ) === $GLOBALS['yac_ocache_enq']['scripts']['yac-ocache-chart']['ver'] );
 check( 'admin JS uses its file timestamp for cache busting', filemtime( __DIR__ . '/../assets/yac-ocache-admin.js' ) === $GLOBALS['yac_ocache_enq']['scripts']['yac-ocache-admin']['ver'] );
 
 /* the status notice prints markup only — no inline script; back on a
