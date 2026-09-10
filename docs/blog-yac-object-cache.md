@@ -85,18 +85,20 @@ wp plugin install https://github.com/laruence/wordpress-yac-cache/releases/lates
 
 ### 配置
 
-激活后 drop-in 自动部署到 `wp-content/object-cache.php`。在 `wp-config.php` 的 "That's all, stop editing!" 之前加两行:
+激活后 drop-in 自动部署到 `wp-content/object-cache.php`,无需改 `wp-config.php`:
+WordPress 加载 object-cache.php 不看 `WP_CACHE`(那个常量只管 `advanced-cache.php`,即页面缓存)。
+
+可选,在 `wp-config.php` 的 "That's all, stop editing!" 之前:
 
 ```php
-define( 'WP_CACHE', true );
-define( 'WP_YAC_KEY_PREFIX', 'ab_' ); // 共享 PHP 池时,每个站点用不同前缀(键不再带 blog 前缀,多站点博客共享命名空间)
+define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // 默认 wp;共享 PHP 池时每个站点用不同前缀(键不带 blog 前缀,多站点博客共享命名空间)
 ```
 
 可选调优(php.ini):
 
 ```ini
 yac.enable = 1
-yac.keys_memory_size = 4M      ; 约 32K 槽位
+yac.keys_memory_size = 16M     ; 约 128K 槽位(每 4M 约 32K)
 yac.values_memory_size = 64M   ; alloptions 大的站点调大
 ```
 

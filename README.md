@@ -130,11 +130,15 @@ then Plugins → Add New → Upload Plugin.
 
 ### Configuration
 
-In `wp-config.php`, above the "That's all, stop editing!" line:
+None required. Activation deploys the drop-in and WordPress loads
+`wp-content/object-cache.php` on its own — `WP_CACHE` does not gate it
+(that constant only controls `advanced-cache.php`, i.e. page caching,
+which this plugin does not provide).
+
+Optional, in `wp-config.php` above the "That's all, stop editing!" line:
 
 ```php
-define( 'WP_CACHE', true );
-define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // unique per install when sites share one PHP pool
+define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // default wp; unique per install when sites share one PHP pool
 ```
 
 Keys carry no per-blog prefix: with a multisite install all blogs share
@@ -148,7 +152,7 @@ Check **Tools → Yac Object Cache** for status, stats and flush actions.
 ```ini
 ; php.ini
 yac.enable = 1
-yac.keys_memory_size = 4M      ; ~32K slots
+yac.keys_memory_size = 16M     ; ~128K slots (~32K per 4M)
 yac.values_memory_size = 64M   ; raise for large sites (alloptions!)
 ```
 

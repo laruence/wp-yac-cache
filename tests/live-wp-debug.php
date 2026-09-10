@@ -47,7 +47,7 @@ foreach ( yac_ocache_status() as $row ) {
 }
 ck( 'status: dropin ok', isset( $states['dropin'] ) && 'ok' === $states['dropin'] );
 ck( 'status: dropin_version ok', ! isset( $states['dropin_version'] ) || 'ok' === $states['dropin_version'] );
-ck( 'status: wp_cache ok', isset( $states['wp_cache'] ) && 'ok' === $states['wp_cache'] );
+ck( 'status: WP_CACHE not reported (does not gate the drop-in)', ! isset( $states['wp_cache'] ) );
 ck( 'status: extension ok', isset( $states['extension'] ) && 'ok' === $states['extension'] );
 ck( 'plugin reports operational', yac_ocache_is_operational() );
 $st = yac_ocache_self_test();

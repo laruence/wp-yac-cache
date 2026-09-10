@@ -79,8 +79,8 @@ require __DIR__ . '/../yac-ocache.php';
 
 // --- Tests -------------------------------------------------------------------
 
-/* no drop-in + no WP_CACHE -> yac_ocache_status() yields err rows, so the
-   status notice should be due */
+/* no drop-in -> yac_ocache_status() yields err rows, so the status notice
+   should be due */
 check( 'status notice is due (error rows present)', yac_ocache_show_status_notice() === true );
 
 /* generic admin screen (e.g. the dashboard): only the notice script loads */

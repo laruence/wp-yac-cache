@@ -3,7 +3,7 @@
  * Plugin Name: Yac Object Cache
  * Plugin URI: https://github.com/laruence/wp-yac-cache
  * Description: Yac (lock-free shared memory) backed object cache for WordPress. Auto-deploys the object-cache.php drop-in on activation. No external servers: the cache lives in shared memory inherited by PHP-FPM workers.
- * Version: 1.2.2
+ * Version: 1.3.0
  * Requires at least: 5.6
  * Requires PHP: 7.0
  * Author: Laruence <laruence@php.net>
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'YAC_OCACHE_VERSION', '1.2.2' );
+define( 'YAC_OCACHE_VERSION', '1.3.0' );
 define( 'YAC_OCACHE_PLUGIN_FILE', __FILE__ );
 define( 'YAC_OCACHE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'YAC_OCACHE_DROPIN_SOURCE', __DIR__ . '/object-cache.php' );
@@ -410,14 +410,10 @@ function yac_ocache_status() {
 		$status[] = array( 'dropin', 'err', 'object-cache.php drop-in is missing.' );
 	}
 
-	if ( ! defined( 'WP_CACHE' ) || ! WP_CACHE ) {
-		$status[] = array( 'wp_cache', 'err', sprintf(
-			"WP_CACHE is not enabled. Add %s to wp-config.php above the \"That's all\" line.",
-			"<code>define( 'WP_CACHE', true );</code>"
-		) );
-	} else {
-		$status[] = array( 'wp_cache', 'ok', 'WP_CACHE is enabled.' );
-	}
+	/* WP_CACHE is deliberately not checked: wp_start_object_cache() loads
+	   wp-content/object-cache.php regardless of it. WP_CACHE only gates
+	   advanced-cache.php (page caching) and wp_cache_postload(), neither of
+	   which this drop-in provides. */
 
 	if ( extension_loaded( 'yac' ) ) {
 		$status[] = array( 'extension', 'ok', sprintf(
@@ -443,7 +439,7 @@ function yac_ocache_status() {
 /* true when the shared backend is fully wired up */
 function yac_ocache_is_operational() {
 	foreach ( yac_ocache_status() as $row ) {
-		if ( in_array( $row[0], array( 'dropin', 'wp_cache', 'extension' ), true ) && 'ok' !== $row[1] ) {
+		if ( in_array( $row[0], array( 'dropin', 'extension' ), true ) && 'ok' !== $row[1] ) {
 			return false;
 		}
 	}
@@ -1056,12 +1052,6 @@ function yac_ocache_pie( $slices ) {
 /* rows of [ directive, current value, scope, description ] for the config table */
 function yac_ocache_config_rows() {
 	return array(
-		array(
-			"define( 'WP_CACHE', true )",
-			defined( 'WP_CACHE' ) && WP_CACHE ? 'enabled' : 'missing',
-			'wp-config.php',
-			'loads the object-cache.php drop-in',
-		),
 		array(
 			"define( 'YAC_OCACHE_KEY_PREFIX', '…' )",
 			sprintf(
@@ -1770,7 +1760,7 @@ function yac_ocache_render_admin_page() {
 				</tr>
 				<tr>
 					<td><code>yac.keys_memory_size</code></td>
-					<td><code><?php echo esc_html( ini_get( 'yac.keys_memory_size' ) ); ?></code> — <?php echo esc_html( 'slot table (~32K slots per 4M); raise when keys fill and hit rate suffers' ); ?></td>
+					<td><code><?php echo esc_html( ini_get( 'yac.keys_memory_size' ) ); ?></code> — <?php echo esc_html( 'slot table (~32K slots per 4M, ~128K per 16M); raise when keys fill and hit rate suffers' ); ?></td>
 				</tr>
 				<tr>
 					<td><code>yac.values_memory_size</code></td>

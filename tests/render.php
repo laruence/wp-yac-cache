@@ -29,7 +29,6 @@ function check( $label, $cond ) {
 
 define( 'ABSPATH', sys_get_temp_dir() . '/' );
 define( 'WP_CONTENT_DIR', sys_get_temp_dir() . '/yac-ocache-render-' . getmypid() );
-define( 'WP_CACHE', true );
 define( 'MINUTE_IN_SECONDS', 60 );
 define( 'HOUR_IN_SECONDS', 3600 );
 define( 'DAY_IN_SECONDS', 86400 );
@@ -278,7 +277,8 @@ check( 'entry inspector modal rendered', strpos( $html, 'yac-ocache-modal' ) !==
 check( 'occupied metric uses padded size', strpos( $html, 'Occupied' ) !== false );
 check( 'group pie rendered', strpos( $html, 'yac-ocache-pie' ) !== false );
 check( 'group pie uses the cache status palette', strpos( $html, '#3675b5' ) !== false && strpos( $html, '#d86135' ) !== false && strpos( $html, '#1b9e77' ) !== false );
-check( 'config lists wp-config directives first', strpos( $html, 'WP_CACHE' ) < strpos( $html, 'yac.enable' ) );
+check( 'config lists wp-config directives first', strpos( $html, 'YAC_OCACHE_EMPTY_TTL' ) < strpos( $html, 'yac.enable' ) );
+check( 'WP_CACHE is not mentioned: it does not gate the drop-in', strpos( $html, 'WP_CACHE' ) === false );
 check( 'legacy card row removed', strpos( $html, 'class="yac-ocache-cards' ) === false );
 check( 'legacy values-health panel removed', strpos( $html, 'Values memory health' ) === false );
 check( 'legacy recycle scare removed', strpos( $html, 'Memory pressure' ) === false );
@@ -522,8 +522,7 @@ check( 'no update button when versions match', strpos( $html, 'Update drop-in' )
 $GLOBALS['yac_ocache_test_status'] = array(
 	array( 'dropin', 'ok', 'object-cache.php drop-in deployed by Yac.' ),
 	array( 'dropin_version', 'ok', 'Drop-in v1.0 is up to date.' ),
-	array( 'wp_cache', 'ok', 'WP_CACHE is enabled.' ),
-	array( 'extension', 'ok', 'Yac extension loaded (shared memory: 4M keys / 64M values).' ),
+	array( 'extension', 'ok', 'Yac extension loaded (shared memory: 16M keys / 64M values).' ),
 );
 
 $html = render_page();

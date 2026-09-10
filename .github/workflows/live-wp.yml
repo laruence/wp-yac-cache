@@ -53,8 +53,10 @@ jobs:
             --extra-php <<'EOF'
           define( 'WP_DEBUG', true );
           define( 'WP_DEBUG_LOG', '/tmp/wp-debug.log' );
-          define( 'WP_CACHE', true );
           EOF
+          # WP_CACHE is deliberately NOT defined: wp_start_object_cache() loads
+          # wp-content/object-cache.php without it, so this run proves the
+          # plugin needs no wp-config edit at all.
           wp core install \
             --url=http://localhost --title="Live Test" \
             --admin_user=admin --admin_password=admin \

@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.2.2
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -33,9 +33,10 @@ Yac is a *local* cache. It is ideal for single-node or few-node WordPress instal
 
 == Screenshots ==
 
-1. Cache health dashboard: hit-rate ring, cause-attributed metric bars and the live shared-memory round trip (0.005 ms).
-2. Storage overview: key slots in use, lookups, hit rate, values-memory pool and the memory-health verdict.
-3. Entry inspector: keys-by-group pie, occupancy totals and the largest entries by content length.
+1. Cache status: hit rate, hits, misses, kicks, recycles and failures over Today / Yesterday / Last 7 days, with the capacity diagnosis on hover.
+2. Shared memory contents: keys-by-group pie, occupancy totals and the largest (or hottest) entries, each clickable for the entry inspector.
+3. Dashboard widget: hit-rate ring, uptime, key slots, values occupied and the 24-hour counters at a glance.
+4. Status bar: the drop-in running on Yac shared memory with the live round-trip measurement.
 
 == Installation ==
 
@@ -54,27 +55,22 @@ phpize && ./configure && make && sudo make install
 `
 
 2. Install and activate Yac Object Cache. Activation deploys `wp-content/object-cache.php`.
-3. In `wp-config.php`, above the "That's all, stop editing!" line, add:
 
-`
-define( 'WP_CACHE', true );
-define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // unique per install when sites share one PHP pool
-`
-
-That is it. Visit **Tools → Yac Object Cache** to verify status.
+That is it — no wp-config edit needed. Visit **Tools → Yac Object Cache** to verify status.
 
 **Optional php.ini tuning**
 
 `
 yac.enable = 1
-yac.keys_memory_size = 4M       ; ~32K slots
+yac.keys_memory_size = 16M      ; ~128K slots (~32K per 4M)
 yac.values_memory_size = 64M    ; raise for large sites (big alloptions)
 `
 
 **Optional wp-config switches**
 
 `
-define( 'YAC_OCACHE_EMPTY_TTL', 0 );    // default 21600: lifetime cap (seconds) on empty-array negative cache results; set 0 to disable
+define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // default wp; give each install its own when sites share one PHP pool
+define( 'YAC_OCACHE_EMPTY_TTL', 0 );      // default 21600: lifetime cap (seconds) on empty-array negative cache results; set 0 to disable
 define( 'YAC_OCACHE_DISABLE', true );     // emergency escape hatch: force runtime-only mode
 `
 
@@ -106,6 +102,13 @@ Yac cannot delete entries by prefix, so a group flush clears the request-level c
 
 == Changelog ==
 
+= 1.3.0 =
+* No wp-config edit is needed any more: `WP_CACHE` is no longer required or reported. WordPress loads `wp-content/object-cache.php` regardless of it — that constant only gates `advanced-cache.php` (page caching), which this plugin does not provide. Installing the extension and activating the plugin is the whole setup, and the live CI run now boots WordPress without the constant to prove it.
+* The Cache health panel became a client-side trend chart: hit rate, hits and misses over Today / Yesterday / Last 7 days, with the window's counters and the capacity diagnosis on hover. Counters are sampled every 15 minutes into a ~7-day ring (~75 KB).
+* Fixed the entry inspector exhausting the PHP memory limit on a busy cache: it now pages through `Yac::dump()` instead of accumulating the whole dump.
+* Fixed the dashboard widget reporting "0 bytes" for values occupied. The Active bar now also shows shared-memory uptime.
+* Suggested tuning raised to `yac.keys_memory_size = 16M` (~128K slots); 4M gives only ~32K.
+
 = 1.2.2 =
 * Fixed stale shared-memory writes: within one request, `wp_cache_set()` on a key already written by `wp_cache_add()` in that same request skipped the shared-memory write, so other requests kept reading the value the add stored (the `update_option()` pattern — `add()` inside `get_option()`, then `set()` — left the old option behind).
 * Replaced `YAC_OCACHE_SKIP_EMPTY` with `YAC_OCACHE_EMPTY_TTL` (default 21600s): empty results (bot-probed `get_page_by_path()` paths, comment query misses) now share as usual but expire after that lifetime instead of occupying a slot forever. Set 0 to disable the cap.
@@ -129,11 +132,7 @@ Yac cannot delete entries by prefix, so a group flush clears the request-level c
 = 1.1.0 =
 * Dashboard rebuilt around a cache-health verdict: hit-rate ring, cause-attributed metric bars, keys-by-group pie, largest entries by content length, configuration reference and runtime diagnostics.
 * Key format rework: `<prefix>:<group>:<key>` with no per-blog prefix (default prefix `wp`); over-long keys keep the group verbatim and hash only the key part; `switch_to_blog()` no longer re-namespaces keys.
-* `YAC_OCACHE_SKIP_EMPTY` (on by default): empty `get_page_by_path:` negatives (bot 404 probes) stay request-local instead of filling slots.
 * `YAC_OCACHE_DISABLE` escape hatch forces runtime-only mode.
 
 = 1.0.0 =
-* Initial release. Yac-backed object cache with self-deploying drop-in, verbatim keys with hashed fallback, multisite support, and graceful runtime-only fallback.
-* Storage key prefix configurable via `YAC_OCACHE_KEY_PREFIX` (0-6 chars, default `wp_`); shorter is better.
-* `wp_cache_flush()` calls `Yac::flush()` and clears the entire shared memory on the machine — the admin page asks for confirmation and states the scope.
-* Admin dashboard: status bar, key-slot donut, counters, memory-health advice, diagnostics, self-test, memory-contents snapshot, and the configuration reference inside the Environment panel.
+* Initial release. Yac-backed object cache with self-deploying drop-in, verbatim keys with hashed fallback, multisite support, graceful runtime-only fallback, and the admin dashboard.
