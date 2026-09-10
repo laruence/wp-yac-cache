@@ -28,7 +28,7 @@ Best fit is single-node (or few-node) WordPress installs.
 - **Health you can read** — hit rate, hits and misses charted over
   Today / Yesterday / Last 7 days, and a diagnosis that also says when *not*
   to add memory. Every key clicks through to its stored value, see
-  [Tools → Yac Object Cache](#tools--yac-object-cache)
+  [Screens](#screens)
 - **Fails soft** — no Yac extension, or `yac.enable=0`, and the drop-in falls
   back to a per-request cache; the site keeps serving instead of dying on a
   missing backend
@@ -45,7 +45,13 @@ blogs of one install share a namespace and `switch_to_blog()` does not
 re-namespace. Give each install its own `YAC_OCACHE_KEY_PREFIX` when sites
 sharing a PHP pool must not see each other's entries.
 
-## Tools → Yac Object Cache
+## Screens
+
+The Dashboard widget summarises the cache without opening anything:
+
+![Dashboard widget](docs/assets/dashboard-widget.png)
+
+Tools → Yac Object Cache has the detail:
 
 ![Cache status](docs/assets/dashboard.png)
 
@@ -64,11 +70,6 @@ embedded-in-slot on newer yac builds.
 Below those: **Configuration** (wp-config knobs with current values),
 **Diagnostics** (versions, PHP/Yac runtime facts) and **Actions** (flush /
 deploy / update / remove the drop-in).
-
-The Dashboard widget carries the summary, so the cache is visible without
-opening the tools page:
-
-![Dashboard widget](docs/assets/dashboard-widget.png)
 
 ## Requirements
 
@@ -92,13 +93,10 @@ pie install laruence/yac
 
 **From source**
 
+Download the latest [release](https://github.com/laruence/yac/releases), unzip it, then inside:
+
 ```bash
-git clone https://github.com/laruence/yac.git
-cd yac
-phpize
-./configure
-make
-sudo make install
+phpize && ./configure && make && make install
 ```
 
 Then enable it in `php.ini`:
@@ -137,9 +135,9 @@ None required. Activation deploys the drop-in and WordPress loads
 `wp-config.php` above the "That's all, stop editing!" line:
 
 ```php
-define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // default wp, 0-6 chars; the only isolation between installs sharing a PHP pool
-define( 'YAC_OCACHE_EMPTY_TTL', 21600 );  // default 6h; lifetime cap on empty negative results, 0 disables
-define( 'YAC_OCACHE_DISABLE', true );     // escape hatch: force runtime-only mode
+define( 'YAC_OCACHE_KEY_PREFIX', 'ab' ); // default wp, 0-6 chars; the only isolation between installs sharing a PHP pool
+define( 'YAC_OCACHE_EMPTY_TTL', 21600 ); // default 6h; lifetime cap on empty negative results, 0 disables
+define( 'YAC_OCACHE_DISABLE', true );    // escape hatch: force runtime-only mode
 ```
 
 Check **Tools → Yac Object Cache** for status, stats and flush actions.

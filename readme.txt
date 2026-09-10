@@ -12,31 +12,25 @@ Yac (lock-free shared memory) backed object cache for WordPress. Zero external s
 
 == Description ==
 
-Yac uses the [Yac](https://github.com/laruence/yac) PHP extension as the backing store for the WordPress object cache.
-
-Unlike Memcached or Redis, Yac stores data in **shared memory inherited by every PHP-FPM worker** on the machine. There is no cache server to install, no socket to configure, and every cache read is a hash lookup in local memory — typically microseconds, with no network round trip and no global lock.
+[Yac](https://github.com/laruence/yac) keeps the cache in shared memory inherited by every PHP-FPM worker on the machine, so a read is a hash lookup in local memory — no cache server, no socket, no network.
 
 **Highlights**
 
-* **Fast.** A cache read is a shared-memory hash lookup — the status page measures a 0.005 ms round trip. On a production site (laruence.com, PHP 8.1-FPM, 8 cores), full homepage renders ran ~20% faster than the classic Memcached drop-in: 141.6 vs 118.7 req/s at 20 concurrent users, +18-20% across 20-100 concurrency, zero failed requests.
-* **No external server.** The cache lives in shared memory (`mmap`/SysV), fork-inherited by FPM workers.
-* **Lock-free.** Per-slot CAS arbitration; throughput scales with worker count. No global lock.
-* **Self-deploying.** Activating the plugin writes `object-cache.php` to `wp-content/`.
-* **Simple keys, simple flush.** Keys are stored verbatim while they fit Yac's 48-byte limit; `wp_cache_flush()` calls `Yac::flush()` and wipes the entire shared memory on the machine — know that before you flush.
-* **Graceful degradation.** If Yac is unavailable (extension missing), the drop-in falls back to a per-request in-memory cache and WordPress keeps working.
-* **Single-node focus.** Keys carry no per-blog prefix; installs sharing one PHP pool isolate via `YAC_OCACHE_KEY_PREFIX`. Multisite blogs share one namespace.
-* **Entry inspector.** On the admin page, click any top-entry key to see the deserialized value, padded size, expiry and — on newer yac builds — last access, hit count and whether the value is embedded in its slot; or delete the entry.
+* **Fast.** No socket, no network, no global lock — per-slot CAS, so throughput scales with workers. A 0.005 ms round trip, and ~19% faster page renders than the Memcached drop-in (141.6 vs 118.7 req/s).
+* **Nothing to operate.** No cache server to install, secure, monitor or restart.
+* **Health you can read.** Hit rate, hits and misses charted over Today / Yesterday / Last 7 days, with a diagnosis that also says when *not* to add memory.
+* **Fails soft.** No extension, or `yac.enable=0`, degrades to a per-request cache and the site keeps serving.
 
 **Best fit**
 
-Yac is a *local* cache. It is ideal for single-node or few-node WordPress installs where all PHP workers run on one machine. On large multi-server clusters with strict cross-node consistency needs, a network cache (Memcached/Redis) may suit better.
+Single-node or few-node installs where all PHP workers share a machine. For multi-server clusters needing cross-node consistency, a network cache (Memcached/Redis) suits better.
 
 == Screenshots ==
 
-1. Tools → Yac Object Cache: cache status — hit rate, hits, misses, kicks, recycles and failures over Today / Yesterday / Last 7 days, with the capacity diagnosis on hover.
-2. Tools → Yac Object Cache: shared memory contents — keys-by-group pie, occupancy totals and the largest (or hottest) entries, each clickable for the entry inspector.
-3. Dashboard widget: hit-rate ring, uptime, key slots, values occupied and the 24-hour counters at a glance.
-4. Tools → Yac Object Cache: the status bar, with the live shared-memory round trip.
+1. Dashboard widget: hit rate, uptime, key slots, values occupied and the 24-hour counters.
+2. Tools → Yac Object Cache: the status bar, with the live shared-memory round trip.
+3. Tools → Yac Object Cache: cache status — hit rate, hits and misses over Today / Yesterday / Last 7 days, with the capacity diagnosis on hover.
+4. Tools → Yac Object Cache: shared memory contents — keys-by-group pie, occupancy totals and the largest (or hottest) entries, each clickable for the entry inspector.
 
 == Installation ==
 
@@ -48,10 +42,12 @@ pecl install yac
 
 # PIE (the PHP Foundation's PECL successor; yac is on Packagist)
 pie install laruence/yac
+`
 
-# Build from source
-git clone https://github.com/laruence/yac.git && cd yac
-phpize && ./configure && make && sudo make install
+Or from source: download the latest [release](https://github.com/laruence/yac/releases), unzip it, then inside:
+
+`
+phpize && ./configure && make && make install
 `
 
 2. Install and activate Yac Object Cache. Activation deploys `wp-content/object-cache.php`.
@@ -69,9 +65,9 @@ yac.values_memory_size = 64M    ; raise for large sites (big alloptions)
 **Optional wp-config switches**
 
 `
-define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // default wp; give each install its own when sites share one PHP pool
-define( 'YAC_OCACHE_EMPTY_TTL', 0 );      // default 21600: lifetime cap (seconds) on empty-array negative cache results; set 0 to disable
-define( 'YAC_OCACHE_DISABLE', true );     // emergency escape hatch: force runtime-only mode
+define( 'YAC_OCACHE_KEY_PREFIX', 'ab' ); // default wp; give each install its own when sites share one PHP pool
+define( 'YAC_OCACHE_EMPTY_TTL', 0 );     // default 21600s: lifetime cap on empty negative results; 0 disables
+define( 'YAC_OCACHE_DISABLE', true );    // escape hatch: force runtime-only mode
 `
 
 == Frequently Asked Questions ==
@@ -82,56 +78,53 @@ No. That is the point — the cache lives in shared memory on the machine.
 
 = What happens if the Yac extension is not installed? =
 
-The drop-in degrades to a per-request in-memory cache. Your site keeps working; you just lose cross-request persistence. The status page flags the missing extension.
+The drop-in degrades to a per-request cache: the site keeps working, you lose cross-request persistence, and the status page flags the missing extension.
 
 = How are keys stored, given Yac's 48-byte key limit? =
 
-Storage keys are `<YAC_OCACHE_KEY_PREFIX>:<group>:<key>` (default prefix `wp`), kept verbatim while they fit the 48-byte budget; over-long keys keep the group verbatim and hash (crc32b) only the key part. Keys carry no per-blog prefix: use a different YAC_OCACHE_KEY_PREFIX per install when sites share one PHP pool; multisite blogs share the namespace.
+As `<YAC_OCACHE_KEY_PREFIX>:<group>:<key>` (default prefix `wp`), verbatim while they fit the 48-byte budget; over-long keys keep the group verbatim and hash (crc32b) only the key part.
 
 = Does flush() clear other Yac users on the same machine? =
 
-Yes. `wp_cache_flush()` calls `Yac::flush()`, which wipes the entire shared memory on the machine, including data written by other Yac users sharing the PHP pool. The admin page asks for confirmation before flushing.
+Yes. `wp_cache_flush()` calls `Yac::flush()`, which wipes the entire shared memory on the machine, including data written by other Yac users sharing the PHP pool. The admin page asks for confirmation first.
 
 = Multisite? =
 
-Yes, with a caveat: blogs of one install share the cache namespace (keys carry no blog prefix), which is fine for most sites; `switch_to_blog()` does not re-namespace keys. Run separate installs with different `YAC_OCACHE_KEY_PREFIX` values when blogs must not share entries.
+Yes, with a caveat: keys carry no per-blog prefix, so blogs of one install share the namespace and `switch_to_blog()` does not re-namespace. Give each install its own `YAC_OCACHE_KEY_PREFIX` when sites sharing a PHP pool must not see each other's entries.
 
 = What about wp_cache_flush_group()? =
 
-Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so WordPress core does not rely on it.
+Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so core does not rely on it.
 
 == Changelog ==
 
 = 1.3.0 =
-* No wp-config edit is needed any more: `WP_CACHE` is no longer required or reported. WordPress loads `wp-content/object-cache.php` regardless of it — that constant only gates `advanced-cache.php` (page caching), which this plugin does not provide. Installing the extension and activating the plugin is the whole setup, and the live CI run now boots WordPress without the constant to prove it.
-* The Cache health panel became a client-side trend chart: hit rate, hits and misses over Today / Yesterday / Last 7 days, with the window's counters and the capacity diagnosis on hover. Counters are sampled every 15 minutes into a ~7-day ring (~75 KB).
+* No wp-config edit is needed any more: `WP_CACHE` is no longer required or reported. WordPress loads `object-cache.php` regardless of it — that constant only gates `advanced-cache.php` (page caching), which this plugin does not provide. The live CI run now boots WordPress without it to prove the point.
+* The Cache health panel became a client-side trend chart: hit rate, hits and misses over Today / Yesterday / Last 7 days, with the window's counters and the capacity diagnosis on hover. Counters are sampled every 15 minutes into a ~7-day ring.
 * Fixed the entry inspector exhausting the PHP memory limit on a busy cache: it now pages through `Yac::dump()` instead of accumulating the whole dump.
 * Fixed the dashboard widget reporting "0 bytes" for values occupied. The Active bar now also shows shared-memory uptime.
 * Suggested tuning raised to `yac.keys_memory_size = 16M` (~128K slots); 4M gives only ~32K.
 
 = 1.2.2 =
-* Fixed stale shared-memory writes: within one request, `wp_cache_set()` on a key already written by `wp_cache_add()` in that same request skipped the shared-memory write, so other requests kept reading the value the add stored (the `update_option()` pattern — `add()` inside `get_option()`, then `set()` — left the old option behind).
-* Replaced `YAC_OCACHE_SKIP_EMPTY` with `YAC_OCACHE_EMPTY_TTL` (default 21600s): empty results (bot-probed `get_page_by_path()` paths, comment query misses) now share as usual but expire after that lifetime instead of occupying a slot forever. Set 0 to disable the cap.
-* The health panel's "keys used" now reports the number of live entries rather than the `slots_used` high-water mark.
+* Fixed stale shared-memory writes: `wp_cache_set()` on a key already written by `wp_cache_add()` in the same request skipped the shared write, so other requests kept reading the value the add stored (the `update_option()` pattern left the old option behind).
+* Replaced `YAC_OCACHE_SKIP_EMPTY` with `YAC_OCACHE_EMPTY_TTL` (default 21600s): empty results now share as usual but expire instead of occupying a slot forever.
+* The health panel's "keys used" reports live entries rather than the `slots_used` high-water mark.
 
 = 1.2.1 =
-* Placed the PHPCS EscapeOutput annotations around the health-ring output so WordPress.org Plugin Check recognizes the exemption (the previous inline annotation sat on the wrong line of the multi-line statement).
-* Annotated `pre_wp_cache_get` in the drop-in as a WordPress core hook.
+* Moved the PHPCS EscapeOutput annotations so WordPress.org Plugin Check recognizes the exemption; annotated `pre_wp_cache_get` as a core hook.
 
 = 1.2.0 =
-* Fixed the health-ring donut on the admin dashboard disappearing: the SVG was piped through `wp_kses_post()`, whose allowed-tag list strips SVG elements and left only the center text visible.
-* Renamed every plugin-owned symbol from the `wp_yac_`/`WP_YAC_`/`wp-yac-` prefixes to `yac_ocache_`/`YAC_OCACHE_`/`yac-ocache-` for WordPress.org prefix policy (the `wp_` prefix is reserved for WordPress core). The wp-config switches were renamed accordingly: `YAC_OCACHE_KEY_PREFIX`, `YAC_OCACHE_SKIP_EMPTY`, `YAC_OCACHE_DISABLE`, `YAC_OCACHE_WARMUP_LOOKUPS`.
-* The `wp_cache_*` functions and the `$wp_object_cache` global are the standard WordPress object cache API and keep their names.
-* WP-CLI: the commands stay `wp yac status` / `wp yac flush`; the command class is now `YAC_OCACHE_CLI_Command`.
+* Fixed the health-ring donut disappearing: `wp_kses_post()` strips SVG elements.
+* Renamed every plugin-owned symbol to the `yac_ocache_`/`YAC_OCACHE_`/`yac-ocache-` prefixes for WordPress.org policy (`wp_` is reserved for core). The `wp_cache_*` functions and `$wp_object_cache` keep their standard names; WP-CLI stays `wp yac status` / `wp yac flush`.
 
 = 1.1.1 =
-* A stored `false` is now written to shared memory as `0`. Yac's `get()` returns `false` for both a miss and a stored `false`, so false negatives never survived past the request; with `0` they persist like any other value (readers comparing by value see `0` instead of `false`).
-* Admin page: top entries grew a Hottest tab (by access count) alongside Largest, shown whenever this yac build reports per-entry hits; the entry inspector gains Hits, Embedded-in-slot and compressed-payload (`c_len`) metadata.
-* Admin page: entry listings now page through `Yac::dump()` 1000 entries at a time instead of one `dump(-1)`, which could exhaust the PHP memory limit on a busy cache; builds older than 2.4.0 fall back to the single full dump.
+* A stored `false` is now written as `0`: Yac's `get()` returns `false` for both a miss and a stored `false`, so a stored false never survived past the request.
+* Top entries grew a Hottest tab (by access count) alongside Largest; the entry inspector gained Hits, Embedded-in-slot and `c_len`.
+* Entry listings page through `Yac::dump()` instead of one `dump(-1)`, which could exhaust the memory limit.
 
 = 1.1.0 =
-* Dashboard rebuilt around a cache-health verdict: hit-rate ring, cause-attributed metric bars, keys-by-group pie, largest entries by content length, configuration reference and runtime diagnostics.
-* Key format rework: `<prefix>:<group>:<key>` with no per-blog prefix (default prefix `wp`); over-long keys keep the group verbatim and hash only the key part; `switch_to_blog()` no longer re-namespaces keys.
+* Dashboard rebuilt around a cache-health verdict, keys-by-group pie, largest entries, configuration reference and diagnostics.
+* Key format rework: `<prefix>:<group>:<key>` with no per-blog prefix; over-long keys hash only the key part.
 * `YAC_OCACHE_DISABLE` escape hatch forces runtime-only mode.
 
 = 1.0.0 =

@@ -66,9 +66,12 @@ pecl install yac
 # PIE(PHP Foundation 的 PECL 继任者,yac 已在 Packagist)
 pie install laruence/yac
 
-# 源码编译
-git clone https://github.com/laruence/yac.git && cd yac
-phpize && ./configure && make && sudo make install
+```
+
+源码编译:下载最新 [release](https://github.com/laruence/yac/releases),解压后:
+
+```bash
+phpize && ./configure && make && make install
 ```
 
 然后 `php.ini` 里启用 `extension=yac.so`。
@@ -90,7 +93,7 @@ wp plugin install https://github.com/laruence/wordpress-yac-cache/releases/lates
 可选,在 `wp-config.php` 的 "That's all, stop editing!" 之前:
 
 ```php
-define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // 默认 wp;共享 PHP 池时每个站点用不同前缀(键不带 blog 前缀,多站点博客共享命名空间)
+define( 'YAC_OCACHE_KEY_PREFIX', 'ab' ); // 默认 wp;共享 PHP 池时每个站点用不同前缀(键不带 blog 前缀,多站点博客共享命名空间)
 ```
 
 可选调优(php.ini):
