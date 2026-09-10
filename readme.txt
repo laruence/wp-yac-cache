@@ -12,11 +12,11 @@ Yac (lock-free shared memory) backed object cache for WordPress. Zero external s
 
 == Description ==
 
-[Yac](https://github.com/laruence/yac) keeps the cache in shared memory inherited by every PHP-FPM worker on the machine, so a read is a hash lookup in local memory — no cache server, no socket, no network.
+[Yac](https://github.com/laruence/yac) keeps the cache in shared memory inherited by every PHP worker on the machine, so a read is a hash lookup in local memory — no cache server, no socket, no network.
 
 **Highlights**
 
-* **Fast.** No socket, no network, no global lock, so throughput scales with workers. On the author's own site (www.laruence.com) page renders came out 19% faster than with the Memcached drop-in.
+* **Fast.** No socket, no network, no global lock, so throughput scales with workers. On the author's own site ([www.laruence.com](https://www.laruence.com)) page renders came out 19% faster than with the Memcached drop-in.
 * **Nothing to operate.** No cache server to install, secure, monitor or restart.
 * **Health you can read.** Hit rate, hits and misses charted over Today / Yesterday / Last 7 days, with a diagnosis that also says when *not* to add memory.
 * **Fails soft.** No extension, or `yac.enable=0`, degrades to a per-request cache and the site keeps serving.
