@@ -62,17 +62,68 @@ jobs:
         run: php -n tests/smoke.php
 
   test-yac:
-    # exercises the shared-memory path: builds the yac extension on the fly,
-    # so the job tracks upstream laruence/yac instead of a pinned commit
+    # exercises the shared-memory path against two extension versions: PECL
+    # latest, so the job tracks upstream laruence/yac, and 2.3.2, the oldest
+    # version the drop-in is tested against. 2.3.2 has no entry metadata in
+    # dump() and its dump() takes no offset, so that leg is what proves the
+    # >= 2.4.0 feature gates degrade instead of failing. smoke.php requires
+    # object-cache.php only, so the coverage here is the drop-in plus
+    # smoke's own dump probe; the admin-side gates in yac-ocache.php
+    # (yac_ocache_dump_all, yac_ocache_dump_entry) are not reached by it.
+    # PHP stays at 8.5 in both legs so the extension version is the only
+    # variable.
+    #
+    # 2.3.2 is installed with PIE rather than setup-php's PECL path because
+    # PIE reads composer.json, which yac gained at 2.3.2 -- that is also why
+    # the old leg is not 2.3.1.
+    name: test-yac (${{ matrix.label }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: 'PECL latest', ext: 'yac', tools: '', pie: '', expect: '' }
+          - { label: '2.3.2 (PIE)', ext: '', tools: 'pie', pie: 'laruence/yac:2.3.2', expect: '2.3.2' }
     steps:
       - uses: actions/checkout@v4
 
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: yac
+          extensions: ${{ matrix.ext }}
+          tools: ${{ matrix.tools }}
           coverage: none
+
+      - name: Install yac with PIE
+        if: matrix.pie != ''
+        env:
+          PKG: ${{ matrix.pie }}
+        run: |
+          # sudo to write the extension dir and conf.d, --with-php-config to
+          # pin the target: sudo resets PATH, so PIE would otherwise probe
+          # whichever php it finds rather than the one set up above
+          sudo "$(command -v pie)" install "$PKG" \
+            --no-interaction --with-php-config="$(command -v php-config)"
+
+      - name: Show the yac version under test
+        env:
+          WANT: ${{ matrix.expect }}
+        run: |
+          got=$(php -r 'echo (string) phpversion( "yac" );')
+          echo "yac ${got:-<not loaded>}"
+          # smoke.php passes without the extension (that is the runtime-only
+          # fallback the test job covers), so a failed load here would look
+          # green while testing nothing
+          if [ -z "$got" ]; then
+            echo "::error::the yac extension is not loaded"
+            exit 1
+          fi
+          # likewise a silently-unpinned install would make this leg a
+          # duplicate of the latest one
+          if [ -n "$WANT" ] && [ "$got" != "$WANT" ]; then
+            echo "::error::expected yac $WANT, got $got"
+            exit 1
+          fi
 
       - name: Syntax check
         run: |
