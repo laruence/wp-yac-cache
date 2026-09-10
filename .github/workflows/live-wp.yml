@@ -40,9 +40,41 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: yac, mysqli
-          tools: wp-cli
+          extensions: mysqli
+          tools: wp-cli, pie
           coverage: none
+
+      # yac comes from PIE, not from setup-php's `extensions: yac`: on Linux
+      # that resolves to the sury/ondrej deb (php8.5-yac 2.3.1++-5), pinned
+      # at 2.3.1, so this workflow had been booting WordPress against an
+      # extension four releases behind. PIE resolves through Packagist,
+      # where an unconstrained laruence/yac gives the newest release.
+      - name: Install yac with PIE
+        run: |
+          # sudo to write the extension dir and conf.d, --with-php-config to
+          # pin the target: sudo resets PATH, so PIE would otherwise probe
+          # whichever php it finds rather than the one set up above
+          sudo "$(command -v pie)" install laruence/yac \
+            --no-interaction --with-php-config="$(command -v php-config)"
+
+      - name: Show the yac version under test
+        env:
+          MIN: '2.4.0'
+        run: |
+          GOT=$(php -r 'echo (string) phpversion( "yac" );')
+          export GOT
+          echo "yac ${GOT:-<not loaded>}"
+          # the drop-in falls back to a runtime-only cache with no extension,
+          # so a failed load would still boot WordPress and look green while
+          # never touching shared memory
+          if [ -z "$GOT" ]; then
+            echo "::error::the yac extension is not loaded"
+            exit 1
+          fi
+          if ! php -r 'exit( version_compare( getenv( "GOT" ), getenv( "MIN" ), ">=" ) ? 0 : 1 );'; then
+            echo "::error::expected yac >= $MIN, got $GOT"
+            exit 1
+          fi
 
       - name: Install WordPress
         run: |
