@@ -85,8 +85,7 @@ wp plugin install https://github.com/laruence/wordpress-yac-cache/releases/lates
 
 ### 配置
 
-激活后 drop-in 自动部署到 `wp-content/object-cache.php`,无需改 `wp-config.php`:
-WordPress 加载 object-cache.php 不看 `WP_CACHE`(那个常量只管 `advanced-cache.php`,即页面缓存)。
+激活后 drop-in 自动部署到 `wp-content/object-cache.php`,无需改 `wp-config.php`。
 
 可选,在 `wp-config.php` 的 "That's all, stop editing!" 之前:
 

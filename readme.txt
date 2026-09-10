@@ -33,10 +33,10 @@ Yac is a *local* cache. It is ideal for single-node or few-node WordPress instal
 
 == Screenshots ==
 
-1. Cache status: hit rate, hits, misses, kicks, recycles and failures over Today / Yesterday / Last 7 days, with the capacity diagnosis on hover.
-2. Shared memory contents: keys-by-group pie, occupancy totals and the largest (or hottest) entries, each clickable for the entry inspector.
+1. Tools → Yac Object Cache: cache status — hit rate, hits, misses, kicks, recycles and failures over Today / Yesterday / Last 7 days, with the capacity diagnosis on hover.
+2. Tools → Yac Object Cache: shared memory contents — keys-by-group pie, occupancy totals and the largest (or hottest) entries, each clickable for the entry inspector.
 3. Dashboard widget: hit-rate ring, uptime, key slots, values occupied and the 24-hour counters at a glance.
-4. Status bar: the drop-in running on Yac shared memory with the live round-trip measurement.
+4. Tools → Yac Object Cache: the status bar, with the live shared-memory round trip.
 
 == Installation ==
 

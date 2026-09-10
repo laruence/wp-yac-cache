@@ -131,9 +131,7 @@ then Plugins → Add New → Upload Plugin.
 ### Configuration
 
 None required. Activation deploys the drop-in and WordPress loads
-`wp-content/object-cache.php` on its own — `WP_CACHE` does not gate it
-(that constant only controls `advanced-cache.php`, i.e. page caching,
-which this plugin does not provide).
+`wp-content/object-cache.php` on its own.
 
 Optional, in `wp-config.php` above the "That's all, stop editing!" line:
 
