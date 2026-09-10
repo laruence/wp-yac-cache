@@ -17,56 +17,58 @@ Best fit is single-node (or few-node) WordPress installs.
 
 ## Features
 
-- **Self-deploying drop-in** — activation copies `object-cache.php` to
-  `wp-content/`; the admin page tracks drop-in version and updates it
-- **Readable storage keys** — keys are stored verbatim while they fit Yac's
-  48-byte limit (the per-site prefix carried by the instance prefix);
-  over-long keys keep
-  the group verbatim and hash (crc32b) only the key part, so dumps and the
-  dashboard pie chart stay attributable by group. Configurable prefix via
-  `YAC_OCACHE_KEY_PREFIX`
-- **Empty-result lifetime cap** — empty-array negative cache results (bot
-  404 probes via `get_page_by_path`, comment query misses) are shared as
-  usual but expire after `YAC_OCACHE_EMPTY_TTL` (default 6 hours) instead
-  of living forever and squeezing hot keys out of the slot table
-- **False-safe** — a stored `false` is coerced to `0` before writing to
-  shared memory (Yac's `get()` cannot tell a stored false from a miss);
-  readers comparing by value see `0` instead of `false`
-- **Admin dashboard** — live stats, health advice and self-test, see
-  [Dashboard](#dashboard)
-- **Multisite aware** — keys carry no per-blog prefix; isolation between
-  installs sharing one PHP pool lives in `YAC_OCACHE_KEY_PREFIX`; multisite
-  blogs share one namespace (run separate installs when they must not)
-- **Graceful degradation** — without the Yac extension the drop-in falls back
-  to a per-request cache and WordPress keeps working
-- **WP-CLI commands** — `wp yac status`, `wp yac flush`
+- **Fast** — a `get()` is a hash lookup in memory the worker already has
+  mapped: no socket, no network, no global lock (per-slot CAS, so throughput
+  scales with worker count). The admin page measures the round trip at
+  0.005 ms; full page renders came out ~19% faster than the Memcached
+  drop-in, see [Benchmarks](#benchmarks)
+- **Nothing to operate** — no cache server to install, configure, secure,
+  monitor or restart. The cache is shared memory the PHP-FPM workers
+  inherit, so the only moving part is PHP itself
+- **Health you can read** — hit rate, hits and misses charted over
+  Today / Yesterday / Last 7 days, and a diagnosis that also says when *not*
+  to add memory. Every key clicks through to its stored value, see
+  [Tools → Yac Object Cache](#tools--yac-object-cache)
+- **Fails soft** — no Yac extension, or `yac.enable=0`, and the drop-in falls
+  back to a per-request cache; the site keeps serving instead of dying on a
+  missing backend
 
-## Dashboard
+Storage behaviour worth knowing: keys are stored verbatim while they fit
+Yac's 48-byte limit (over-long ones keep the group and hash only the key
+part, so dumps stay attributable by group); empty negative results expire
+after `YAC_OCACHE_EMPTY_TTL` instead of occupying a slot forever; and a
+stored `false` is written as `0`, because Yac's `get()` cannot tell a stored
+false from a miss — readers comparing by value see `0`.
 
-![Yac dashboard](docs/assets/dashboard.png)
+**Multisite is a caveat, not a feature.** Keys carry no per-blog prefix, so
+blogs of one install share a namespace and `switch_to_blog()` does not
+re-namespace. Give each install its own `YAC_OCACHE_KEY_PREFIX` when sites
+sharing a PHP pool must not see each other's entries.
+
+## Tools → Yac Object Cache
+
+![Cache status](docs/assets/dashboard.png)
+
+Hit rate, hits and misses over Today / Yesterday / Last 7 days, with the
+window's kicks, recycles and failures. Counters are sampled every 15
+minutes into a ~7-day ring; hovering the verdict gives the capacity
+diagnosis — including when *not* to add memory.
 
 ![Shared memory contents](docs/assets/dashboard-contents.png)
 
-The first panel is the verdict: hit-rate ring, Healthy / Attention /
-Critical, and cause-attributed metric bars — all green when healthy,
-only the causing metrics take the verdict color. The second shows what
-the shared memory actually holds: keys-by-group pie, occupancy stats and
-the largest entries by content length; every key clicks through to the
-entry inspector (deserialized value, expiry, last access on newer yac
-builds, padded size, delete).
+What the shared memory actually holds: keys-by-group pie, occupancy totals
+and the largest (or hottest) entries. Every key clicks through to the entry
+inspector — deserialized value, padded size, expiry, delete, plus hits and
+embedded-in-slot on newer yac builds.
 
-Tools → Yac Object Cache, top to bottom:
+Below those: **Configuration** (wp-config knobs with current values),
+**Diagnostics** (versions, PHP/Yac runtime facts) and **Actions** (flush /
+deploy / update / remove the drop-in).
 
-- **Status** — one green bar when everything is wired (`Active … round
-  trip X ms`), or the concrete problem list otherwise
-- **Cache health** — hit-rate ring with a Healthy / Attention / Critical
-  verdict, plus per-metric bars (keys, values, hits, misses, kicks,
-  recycles); the advice names the `php.ini` knob to raise
-- **Shared memory contents** — keys-by-group pie, occupancy stats and
-  largest entries, pictured above
-- **Configuration** — the wp-config.php knobs with current values
-- **Diagnostics** — versions, PHP/Yac runtime facts, key budget
-- **Actions** — flush / deploy / update / remove the drop-in
+The Dashboard widget carries the summary, so the cache is visible without
+opening the tools page:
+
+![Dashboard widget](docs/assets/dashboard-widget.png)
 
 ## Requirements
 
@@ -131,17 +133,14 @@ then Plugins → Add New → Upload Plugin.
 ### Configuration
 
 None required. Activation deploys the drop-in and WordPress loads
-`wp-content/object-cache.php` on its own.
-
-Optional, in `wp-config.php` above the "That's all, stop editing!" line:
+`wp-content/object-cache.php` on its own. Optional switches, in
+`wp-config.php` above the "That's all, stop editing!" line:
 
 ```php
-define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // default wp; unique per install when sites share one PHP pool
+define( 'YAC_OCACHE_KEY_PREFIX', 'ab_' ); // default wp, 0-6 chars; the only isolation between installs sharing a PHP pool
+define( 'YAC_OCACHE_EMPTY_TTL', 21600 );  // default 6h; lifetime cap on empty negative results, 0 disables
+define( 'YAC_OCACHE_DISABLE', true );     // escape hatch: force runtime-only mode
 ```
-
-Keys carry no per-blog prefix: with a multisite install all blogs share
-one cache namespace. When sites sharing one PHP pool must not see each
-other's entries, give each its own `YAC_OCACHE_KEY_PREFIX`.
 
 Check **Tools → Yac Object Cache** for status, stats and flush actions.
 
@@ -168,20 +167,11 @@ yac.values_memory_size = 64M   ; raise for large sites (alloptions!)
 > in the ini falls back to `php` silently — check `php --ri yac`
 > (`Serializer =>`) for what is actually in effect, not what the ini says.
 
-```php
-; wp-config.php escape hatches
-define( 'YAC_OCACHE_DISABLE', true );    // force runtime-only mode
-define( 'YAC_OCACHE_KEY_PREFIX', 'wp' ); // key prefix, 0-6 chars; per-site isolation when sharing a PHP pool
-
-// Bots probe unbounded one-off URLs, and WordPress mints a cache entry
-// per query — get_page_by_path:<md5>, comment query hashes... — whose
-// value is often an empty negative result. Written without expiry, those
-// live forever and each one keeps occupying a slot until kicked.
-// YAC_OCACHE_EMPTY_TTL caps their lifetime: they stay shared (re-reads
-// still hit), expire after the TTL and free up on the next kick. Set 0
-// to disable the cap.
-define( 'YAC_OCACHE_EMPTY_TTL', 21600 ); // seconds; default 6 hours
-```
+Why `YAC_OCACHE_EMPTY_TTL` exists: bots probe unbounded one-off URLs and
+WordPress mints a cache entry per query (`get_page_by_path:<md5>`, comment
+query hashes), often holding an empty negative result. Written without
+expiry, each one occupies a slot forever. The TTL keeps them shared —
+re-reads still hit — but lets them age out.
 
 ## Benchmarks
 
