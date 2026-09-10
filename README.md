@@ -5,13 +5,14 @@
 
 A [Yac](https://github.com/laruence/yac) backed object cache for WordPress.
 
-Yac stores the cache in lock-free shared memory inherited by all PHP-FPM
-workers on the machine: no cache server, no socket, no network round trips.
-A `get()` is one hash lookup in local memory.
+Yac stores the cache in lock-free shared memory accessible to all PHP
+workers: no cache server, no socket, no network round trips. A `get()` is
+one hash lookup in local memory.
 
-Benchmarked against the classic Memcached drop-in on a real WordPress site
-(PHP 8.1 FPM, 8 cores): **~19% higher throughput and ~15% lower latency**
-across 20/50/100 concurrent users — see [Benchmarks](#benchmarks).
+On the author's own site ([www.laruence.com](https://www.laruence.com),
+PHP 8.1 FPM, 8 cores) it came out **~19% higher throughput and ~15% lower
+latency** than the classic Memcached drop-in across 20/50/100 concurrent
+users — see [Benchmarks](#benchmarks).
 
 Best fit is single-node (or few-node) WordPress installs.
 
@@ -19,12 +20,12 @@ Best fit is single-node (or few-node) WordPress installs.
 
 - **Fast** — a `get()` is a hash lookup in memory the worker already has
   mapped: no socket, no network, no global lock (per-slot CAS, so throughput
-  scales with worker count). The admin page measures the round trip at
-  0.005 ms; full page renders came out ~19% faster than the Memcached
-  drop-in, see [Benchmarks](#benchmarks)
+  scales with worker count). On the author's own site the admin page
+  measures the round trip at 0.005 ms and full page renders came out ~19%
+  faster than the Memcached drop-in, see [Benchmarks](#benchmarks)
 - **Nothing to operate** — no cache server to install, configure, secure,
-  monitor or restart. The cache is shared memory the PHP-FPM workers
-  inherit, so the only moving part is PHP itself
+  monitor or restart. The cache is shared memory the PHP workers attach
+  to, so the only moving part is PHP itself
 - **Health you can read** — hit rate, hits and misses charted over
   Today / Yesterday / Last 7 days, and a diagnosis that also says when *not*
   to add memory. Every key clicks through to its stored value, see

@@ -12,7 +12,7 @@ Yac (lock-free shared memory) backed object cache for WordPress. Zero external s
 
 == Description ==
 
-[Yac](https://github.com/laruence/yac) keeps the cache in shared memory inherited by every PHP worker on the machine, so a read is a hash lookup in local memory — no cache server, no socket, no network.
+[Yac](https://github.com/laruence/yac) keeps the cache in a shared memory segment accessible to all PHP workers, so a read is a hash lookup in local memory — no cache server, no socket, no network.
 
 **Highlights**
 

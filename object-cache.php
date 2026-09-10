@@ -3,7 +3,7 @@
  * Yac Object Cache: Yac-backed drop-in for the WordPress object cache.
  * Install this file to wp-content/object-cache.php.
  *
- * Yac keeps the cache in shared memory inherited by all PHP-FPM workers,
+ * Yac keeps the cache in shared memory accessible to all PHP workers,
  * so a get() is one hash lookup: no server, no socket, no network.
  *
  * - Keys are stored verbatim as "<prefix><group>:<key>" as long as they
