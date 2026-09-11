@@ -1438,7 +1438,14 @@ function yac_ocache_admin_init() {
 		case 'remove':
 			$removed = false;
 			if ( yac_ocache_dropin_is_ours() ) {
-				$removed = wp_delete_file( YAC_OCACHE_DROPIN_DEST ) && ! file_exists( YAC_OCACHE_DROPIN_DEST );
+				/* wp_delete_file() returns void, so the removal can only be
+				   confirmed by the file being gone afterwards */
+				wp_delete_file( YAC_OCACHE_DROPIN_DEST );
+				clearstatcache( true, YAC_OCACHE_DROPIN_DEST );
+				$removed = ! file_exists( YAC_OCACHE_DROPIN_DEST );
+			}
+			if ( $removed ) {
+				delete_option( 'yac_ocache_dropin_deployed' );
 			}
 			wp_safe_redirect( add_query_arg( 'yac_ocache_notice', $removed ? 'removed' : 'remove_failed', $redirect ) );
 			exit;
