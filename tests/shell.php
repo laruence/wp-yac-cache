@@ -72,9 +72,14 @@ check( 'deploy_dropin returns true', $ok === true );
 check( 'drop-in file created in wp-content', file_exists( WP_CONTENT_DIR . '/object-cache.php' ) );
 check( 'dropin_is_ours detects our marker', yac_ocache_dropin_is_ours() === true );
 
-// Status should not error out.
+// Status should not error out. Assert on the keys that must be reported rather
+// than a row count: 1.3.0 dropped the wp_cache row and the old ">= 4" rotted.
 $status = yac_ocache_status();
-check( 'status returns rows', is_array( $status ) && count( $status ) >= 4 );
+$status_keys = is_array( $status ) ? array_column( $status, 0 ) : array();
+check(
+	'status reports dropin, dropin_version and extension',
+	! array_diff( array( 'dropin', 'dropin_version', 'extension' ), $status_keys )
+);
 
 $found_dropin_ok = false;
 foreach ( $status as $row ) {
