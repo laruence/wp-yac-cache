@@ -112,6 +112,71 @@ jobs:
           wp plugin check yac-ocache --format=table \
             --require=wp-content/plugins/plugin-check/cli.php
 
+      # tests/cli.php stubs the WP_CLI class, so it can assert the @subcommand
+      # tags are present but not that WP-CLI honours them. Only a real wp run
+      # proves the registration, and the stale-drop-in scenario this covers is
+      # exactly what `wp plugin update` leaves behind.
+      - name: Exercise the WP-CLI drop-in commands
+        run: |
+          cd /tmp/wp
+          DROPIN=/tmp/wp/wp-content/object-cache.php
+          SRC=/tmp/wp/wp-content/plugins/yac-ocache/object-cache.php
+
+          # WP-CLI does not derive "update-dropin" from update_dropin(): the
+          # hyphenated name comes from the @subcommand tag. Without it these
+          # register as "wp yac update_dropin" and every doc line is a lie.
+          # a bare parent command only prints usage; don't depend on its exit
+          # code, the greps below are the actual assertion
+          wp yac > /tmp/yac-usage.txt 2>&1 || true
+          cat /tmp/yac-usage.txt
+          for sub in status flush deploy-dropin update-dropin remove-dropin; do
+            grep -q "wp yac $sub" /tmp/yac-usage.txt \
+              || { echo "::error::wp yac $sub is not registered"; exit 1; }
+          done
+
+          wp yac status
+
+          # Age the deployed copy: this is the state `wp plugin update` leaves,
+          # since it replaces the plugin but never rewrites wp-content.
+          sed -i "s/YAC_OCACHE_DROPIN_VERSION', '[^']*'/YAC_OCACHE_DROPIN_VERSION', '0.9.0'/" "$DROPIN"
+          wp yac status | tee /tmp/yac-stale.txt
+          grep -q 'deployed v0.9.0' /tmp/yac-stale.txt \
+            || { echo "::error::status does not report the stale drop-in"; exit 1; }
+          grep -q 'wp yac update-dropin' /tmp/yac-stale.txt \
+            || { echo "::error::status does not point CLI users at update-dropin"; exit 1; }
+
+          wp yac update-dropin
+          # a plain copy, so the deployed file must be byte-identical again
+          diff -q "$SRC" "$DROPIN"
+          wp yac status | grep -q 'up to date' \
+            || { echo "::error::status still reports a stale drop-in"; exit 1; }
+
+          wp yac remove-dropin --yes
+          test ! -f "$DROPIN"
+          wp yac status | grep -q 'drop-in is missing' \
+            || { echo "::error::status does not report the missing drop-in"; exit 1; }
+
+          wp yac deploy-dropin
+          diff -q "$SRC" "$DROPIN"
+
+          # A drop-in owned by another cache plugin is never overwritten or
+          # deleted. WordPress falls back to core's cache when object-cache.php
+          # defines no wp_cache_init, so this stub still boots WP-CLI.
+          mv "$DROPIN" /tmp/yac-ours.php
+          printf '%s\n' '<?php' '// foreign object cache, not Yac' > "$DROPIN"
+          if wp yac deploy-dropin; then
+            echo "::error::deploy-dropin did not refuse a foreign drop-in"; exit 1
+          fi
+          if wp yac remove-dropin --yes; then
+            echo "::error::remove-dropin did not refuse a foreign drop-in"; exit 1
+          fi
+          grep -q 'foreign object cache' "$DROPIN" \
+            || { echo "::error::the foreign drop-in was modified"; exit 1; }
+
+          # restore ours: the live debug test below asserts dropin_version is ok
+          mv /tmp/yac-ours.php "$DROPIN"
+          wp yac status
+
       - name: Run the live debug test
         run: |
           cd /tmp/wp

@@ -143,6 +143,28 @@ define( 'YAC_OCACHE_DISABLE', true );    // escape hatch: force runtime-only mod
 
 Check **Tools → Yac Object Cache** for status, stats and flush actions.
 
+## WP-CLI
+
+```bash
+wp yac status           # deployment status, one line per check
+wp yac flush            # flush the object cache (wipes the whole Yac segment)
+wp yac update-dropin    # refresh wp-content/object-cache.php from the plugin's copy
+wp yac deploy-dropin    # deploy it after it was removed by hand
+wp yac remove-dropin    # remove it; the cache falls back to the WordPress default
+```
+
+`wp plugin update` does not touch the drop-in: `wp-content/object-cache.php` is a
+copy, so it stays at the old version until it is rewritten. `wp yac status` then
+reports the mismatch. Updating the plugin from the CLI is two steps:
+
+```bash
+wp plugin update yac-object-cache && wp yac update-dropin
+```
+
+A foreign `object-cache.php` is never overwritten or deleted; both drop-in
+commands refuse and say so. With `opcache.validate_timestamps=0`, reload PHP-FPM
+after an update — workers keep serving the cached old drop-in.
+
 ## Tuning
 
 ```ini
@@ -199,6 +221,7 @@ before you flush.
 php -d yac.enable_cli=1 tests/smoke.php   # shared-memory path
 php -n tests/smoke.php                    # runtime-only fallback path
 php tests/shell.php                       # plugin shell (deploy/status)
+php tests/cli.php                         # WP-CLI subcommands (drop-in deploy/update/remove)
 php tests/render.php                      # admin page render (charts/advice)
 ```
 

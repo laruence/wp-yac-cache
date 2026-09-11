@@ -393,10 +393,14 @@ function yac_ocache_status() {
 		if ( null === $deployed ) {
 			$status[] = array( 'dropin_version', 'warn', 'Could not determine the deployed drop-in version.' );
 		} elseif ( version_compare( YAC_OCACHE_VERSION, $deployed, '>' ) ) {
+			/* "the actions below" only makes sense on the admin page */
 			$status[] = array( 'dropin_version', 'warn', sprintf(
-				'A newer drop-in is available: plugin v%1$s, deployed v%2$s. Update it from the actions below.',
+				'A newer drop-in is available: plugin v%1$s, deployed v%2$s. %3$s',
 				YAC_OCACHE_VERSION,
-				$deployed
+				$deployed,
+				defined( 'WP_CLI' ) && WP_CLI
+					? 'Run `wp yac update-dropin` to update it.'
+					: 'Update it from the actions below.'
 			) );
 		} else {
 			$status[] = array( 'dropin_version', 'ok', sprintf(
@@ -1914,6 +1918,119 @@ if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( 'WP_CLI' ) ) {
 				$mark = 'ok' === $row[1] ? 'OK  ' : ( 'warn' === $row[1] ? 'WARN' : 'ERR ' );
 				\WP_CLI::log( sprintf( '[%s] %s', $mark, $strip_tags( $row[2] ) ) );
 			}
+		}
+
+		/**
+		 * Deploy the object-cache.php drop-in, keeping an existing Yac drop-in as is.
+		 *
+		 * Use this after a drop-in was removed by hand. To refresh an
+		 * already-deployed Yac drop-in, use `wp yac update-dropin`.
+		 *
+		 * ## EXAMPLES
+		 *
+		 *     wp yac deploy-dropin
+		 *
+		 * @subcommand deploy-dropin
+		 */
+		public function deploy_dropin() {
+			if ( yac_ocache_dropin_is_ours() ) {
+				\WP_CLI::success( sprintf(
+					'Drop-in already deployed by Yac (v%s). Use `wp yac update-dropin` to refresh it.',
+					(string) yac_ocache_dropin_version()
+				) );
+				return;
+			}
+
+			$this->write_dropin();
+		}
+
+		/**
+		 * Refresh the deployed drop-in from the plugin's copy.
+		 *
+		 * This is the CLI counterpart of the "Update drop-in" button, the step
+		 * `wp plugin update` cannot do on its own: updating the plugin leaves
+		 * wp-content/object-cache.php at its old version.
+		 *
+		 * ## EXAMPLES
+		 *
+		 *     wp yac update-dropin
+		 *
+		 * @subcommand update-dropin
+		 */
+		public function update_dropin() {
+			/* the deployed version, read before the file is overwritten */
+			$before = yac_ocache_dropin_version();
+
+			$this->write_dropin( true );
+
+			if ( null !== $before && version_compare( YAC_OCACHE_VERSION, $before, '>' ) ) {
+				\WP_CLI::log( sprintf( 'Updated v%1$s -> v%2$s.', $before, YAC_OCACHE_VERSION ) );
+			}
+		}
+
+		/**
+		 * Remove the Yac drop-in; the object cache falls back to the WordPress default.
+		 *
+		 * A foreign object-cache.php is never touched.
+		 *
+		 * ## OPTIONS
+		 *
+		 * [--yes]
+		 * : Skip the confirmation prompt.
+		 *
+		 * ## EXAMPLES
+		 *
+		 *     wp yac remove-dropin --yes
+		 *
+		 * @subcommand remove-dropin
+		 *
+		 * @param array $args       Positional arguments (unused).
+		 * @param array $assoc_args Associative arguments.
+		 */
+		public function remove_dropin( $args, $assoc_args ) {
+			if ( ! yac_ocache_dropin_is_ours() ) {
+				\WP_CLI::error( file_exists( YAC_OCACHE_DROPIN_DEST )
+					? 'object-cache.php is not owned by Yac; refusing to remove it.'
+					: 'No drop-in to remove.' );
+			}
+
+			\WP_CLI::confirm(
+				'Remove the Yac drop-in? The object cache falls back to the WordPress default (database/options).',
+				$assoc_args
+			);
+
+			wp_delete_file( YAC_OCACHE_DROPIN_DEST );
+
+			if ( file_exists( YAC_OCACHE_DROPIN_DEST ) ) {
+				\WP_CLI::error( sprintf( 'Could not remove %s. Check its permissions.', YAC_OCACHE_DROPIN_DEST ) );
+			}
+
+			delete_option( 'yac_ocache_dropin_deployed' );
+			\WP_CLI::success( 'Drop-in removed.' );
+		}
+
+		/* shared by deploy-dropin and update-dropin: pre-flight the two
+		   failure modes deploy_dropin() collapses into one false, write,
+		   then flag a stale-opcache setup */
+		private function write_dropin( $force = false ) {
+			if ( ! yac_ocache_dropin_is_ours() && file_exists( YAC_OCACHE_DROPIN_DEST ) ) {
+				\WP_CLI::error( sprintf(
+					'A foreign %s exists; another object cache is in charge. Remove it first if you want Yac to take over.',
+					YAC_OCACHE_DROPIN_DEST
+				) );
+			}
+
+			if ( ! is_readable( YAC_OCACHE_DROPIN_SOURCE ) ) {
+				\WP_CLI::error( sprintf( 'Cannot read the plugin copy at %s.', YAC_OCACHE_DROPIN_SOURCE ) );
+			}
+
+			if ( ! yac_ocache_deploy_dropin( $force ) ) {
+				\WP_CLI::error( sprintf( 'Could not write %s. Check that wp-content is writable by this user.', YAC_OCACHE_DROPIN_DEST ) );
+			}
+
+			/* YAC_OCACHE_DROPIN_VERSION still holds the version loaded at
+			   bootstrap, so report the version that was just written */
+			\WP_CLI::success( sprintf( 'Drop-in v%s deployed.', YAC_OCACHE_VERSION ) );
 		}
 	}
 

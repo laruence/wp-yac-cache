@@ -61,6 +61,15 @@ jobs:
       - name: Drop-in smoke test (runtime-only fallback)
         run: php -n tests/smoke.php
 
+      # Both stub WordPress and need no extension, so they run across the whole
+      # PHP matrix. render.php stays out: it is 104/4 without yac, since
+      # YAC_VERSION alone drives the dump() feature gates it asserts on.
+      - name: Plugin shell test (deploy/status)
+        run: php -n tests/shell.php
+
+      - name: WP-CLI subcommand test (drop-in deploy/update/remove)
+        run: php -n tests/cli.php
+
   test-yac:
     # exercises the shared-memory path against two extension versions: the
     # current upstream release, and 2.3.2, the oldest version the drop-in is
