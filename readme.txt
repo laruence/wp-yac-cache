@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.3.0
+Stable tag: 1.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -97,6 +97,11 @@ Yes, with a caveat: keys carry no per-blog prefix, so blogs of one install share
 Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so core does not rely on it.
 
 == Changelog ==
+
+= 1.3.1 =
+* Fixed the admin "Remove drop-in" action always reporting failure.
+* Added WP-CLI commands: `wp yac deploy-dropin`, `wp yac update-dropin`, `wp yac remove-dropin`.
+* Comment-query cache misses (`WP_Comment_Query::get_comments()` wraps an empty result as `array('comment_ids' => array(), 'found_comments' => 0)`) are now recognized as negative cache results and capped by `YAC_OCACHE_EMPTY_TTL` instead of occupying a slot forever.
 
 = 1.3.0 =
 * No wp-config edit is needed any more: `WP_CACHE` is no longer required or reported. WordPress loads `object-cache.php` regardless of it — that constant only gates `advanced-cache.php` (page caching), which this plugin does not provide. The live CI run now boots WordPress without it to prove the point.

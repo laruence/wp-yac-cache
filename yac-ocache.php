@@ -3,7 +3,7 @@
  * Plugin Name: Yac Object Cache
  * Plugin URI: https://github.com/laruence/wp-yac-cache
  * Description: Yac (lock-free shared memory) backed object cache for WordPress. Auto-deploys the object-cache.php drop-in on activation. No external servers: the cache lives in shared memory accessible to all PHP workers.
- * Version: 1.3.0
+ * Version: 1.3.1
  * Requires at least: 5.6
  * Requires PHP: 7.0
  * Author: Laruence <laruence@php.net>
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'YAC_OCACHE_VERSION', '1.3.0' );
+define( 'YAC_OCACHE_VERSION', '1.3.1' );
 define( 'YAC_OCACHE_PLUGIN_FILE', __FILE__ );
 define( 'YAC_OCACHE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'YAC_OCACHE_DROPIN_SOURCE', __DIR__ . '/object-cache.php' );
