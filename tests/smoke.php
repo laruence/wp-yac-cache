@@ -328,6 +328,29 @@ if ( $yac_on ) {
 	check( 'explicit shorter expiry wins over the cap',
 		isset( $by_key['wp:default:ttl-short'] )
 		&& (int) $by_key['wp:default:ttl-short']['ttl'] <= $now + 120 );
+
+	/* WP_Comment_Query::get_comments() wraps a comment-query miss as
+	   array( 'comment_ids' => array(), 'found_comments' => 0 ) in the
+	   'comment' group: top level is non-empty, so the generic empty-array
+	   check alone would miss it and let it live forever */
+	wp_cache_set( 'get_comments:ttl-comment-miss:1', array( 'comment_ids' => array(), 'found_comments' => 0 ), 'comment' );
+	wp_cache_set( 'get_comments:ttl-comment-hit:1', array( 'comment_ids' => array( 1, 2 ), 'found_comments' => 2 ), 'comment' );
+	$GLOBALS['wp_object_cache'] = new Yac_Ocache_Object_Cache();
+
+	$by_key = array();
+	foreach ( (array) $probe->dump( $pages ? 1000 : -1 ) as $it ) {
+		if ( isset( $it['key'] ) ) {
+			$by_key[ $it['key'] ] = $it;
+		}
+	}
+	$now = time();
+	check( 'comment-query miss (wrapped empty comment_ids) gets the EMPTY_TTL cap',
+		isset( $by_key['wp:comment:get_comments:ttl-comment-miss:1'] )
+		&& (int) $by_key['wp:comment:get_comments:ttl-comment-miss:1']['ttl'] > $now
+		&& (int) $by_key['wp:comment:get_comments:ttl-comment-miss:1']['ttl'] <= $now + YAC_OCACHE_EMPTY_TTL );
+	check( 'comment-query hit (non-empty comment_ids) keeps the original (no) expiry',
+		isset( $by_key['wp:comment:get_comments:ttl-comment-hit:1'] )
+		&& 0 === (int) $by_key['wp:comment:get_comments:ttl-comment-hit:1']['ttl'] );
 } else {
 	echo "  skip empty-ttl persistence assertions (Yac not active)\n";
 }

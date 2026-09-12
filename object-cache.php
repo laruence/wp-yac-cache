@@ -328,7 +328,7 @@ class Yac_Ocache_Object_Cache {
 			return false;
 		}
 
-		$ttl = $this->empty_value_ttl( $expire, $data );
+		$ttl = $this->empty_value_ttl( $expire, $data, $group );
 
 		/* Yac::add() can return false on CAS contention even for a free
 		   slot, so retry a couple of times */
@@ -618,7 +618,7 @@ class Yac_Ocache_Object_Cache {
 			return true;
 		}
 
-		$ttl = $this->empty_value_ttl( $expire, $data );
+		$ttl = $this->empty_value_ttl( $expire, $data, $group );
 
 		/* store raw (no wrapper) so small scalars hit Yac's embedded
 		   path and live inside the slot itself, no value block; false
@@ -699,14 +699,34 @@ class Yac_Ocache_Object_Cache {
 	   get_page_by_path paths, comment query misses...): shared as usual,
 	   but their lifetime is capped by YAC_OCACHE_EMPTY_TTL so they expire
 	   and their slots free up instead of living forever until kicked */
-	private function empty_value_ttl( $expire, $data ) {
-		if ( 0 === YAC_OCACHE_EMPTY_TTL || ! is_array( $data ) || ! empty( $data ) ) {
+	private function empty_value_ttl( $expire, $data, $group ) {
+		if ( 0 === YAC_OCACHE_EMPTY_TTL || ! is_array( $data ) ) {
+			return $this->sanitize_ttl( $expire );
+		}
+
+		if ( ! empty( $data ) && ! $this->is_empty_comment_query( $group, $data ) ) {
 			return $this->sanitize_ttl( $expire );
 		}
 
 		$ttl = $this->sanitize_ttl( $expire );
 
 		return $ttl > 0 ? min( $ttl, YAC_OCACHE_EMPTY_TTL ) : YAC_OCACHE_EMPTY_TTL;
+	}
+
+	/* WP_Comment_Query::get_comments() never stores a bare empty array
+	   for a miss: it wraps it as array( 'comment_ids' => array(), 'found_comments' => 0 ),
+	   so the top level is non-empty and the generic empty-array check above
+	   misses it. Every distinct query args + last_changed combination gets
+	   its own key ("get_comments:$key:$last_changed"), so unbounded bot/crawler
+	   traffic against empty result sets (e.g. comment pagination past the end,
+	   filtered queries with no matches) would otherwise keep occupying slots
+	   forever. Match the shape explicitly instead of recursing into every
+	   array value, which would risk capping legitimate non-empty cache entries
+	   that merely contain an empty sub-array. */
+	private function is_empty_comment_query( $group, $data ) {
+		return 'comment' === $group
+			&& array_key_exists( 'comment_ids', $data )
+			&& empty( $data['comment_ids'] );
 	}
 
 	private function sanitize_group( $group ) {
