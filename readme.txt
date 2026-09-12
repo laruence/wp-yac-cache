@@ -16,7 +16,7 @@ Yac (lock-free shared memory) backed object cache for WordPress. Zero external s
 
 **Highlights**
 
-* **Fast.** No socket, no network, no global lock, so throughput scales with workers. On the author's own site ([www.laruence.com](https://www.laruence.com)) page renders came out 19% faster than with the Memcached drop-in.
+* **Fast.** No socket, no network, no global lock, so throughput scales with workers. Yac's own [benchmark](https://github.com/laruence/yac#benchmarks) measured 13x-70x higher ops/s than APCu and 170x-730x higher than local Memcached, depending on value size. On the author's own site ([www.laruence.com](https://www.laruence.com)) that translated to page renders coming out 19% faster than with the Memcached drop-in.
 * **Nothing to operate.** No cache server to install, secure, monitor or restart.
 * **Health you can read.** Hit rate, hits and misses charted over Today / Yesterday / Last 7 days, with a diagnosis that also says when *not* to add memory.
 * **Fails soft.** No extension, or `yac.enable=0`, degrades to a per-request cache and the site keeps serving.
