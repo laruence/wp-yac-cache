@@ -21,7 +21,7 @@ Best fit is single-node (or few-node) WordPress installs.
 - **Fast** — a `get()` is a hash lookup in memory the worker already has
   mapped: no socket, no network, no global lock (per-slot CAS, so throughput
   scales with worker count). On the author's own site the admin page
-  measures the round trip at 0.005 ms and full page renders came out ~19%
+  measures the round trip at 0.004 ms and full page renders came out ~19%
   faster than the Memcached drop-in, see [Benchmarks](#benchmarks)
 - **Nothing to operate** — no cache server to install, configure, secure,
   monitor or restart. The cache is shared memory the PHP workers attach
@@ -52,7 +52,12 @@ The Dashboard widget summarises the cache without opening anything:
 
 ![Dashboard widget](docs/assets/dashboard-widget.png)
 
-Tools → Yac Object Cache has the detail:
+Tools → Yac Object Cache opens with the status bar — active backend,
+shared-memory uptime and the live round trip:
+
+![Status](docs/assets/dashboard-status.png)
+
+Below it, the detail:
 
 ![Cache status](docs/assets/dashboard.png)
 
