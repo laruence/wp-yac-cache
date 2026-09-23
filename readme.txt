@@ -90,7 +90,7 @@ Yes. `wp_cache_flush()` calls `Yac::flush()`, which wipes the entire shared memo
 
 = Multisite? =
 
-Yes. On multisite the Yac instance prefix is `YAC_OCACHE_KEY_PREFIX` + the current blog id (ids up to 9999 verbatim, larger ids a 4-hex crc32b digest), and `switch_to_blog()` re-namespaces: blogs of one install get separate namespaces and never read each other's entries. Installs sharing one PHP pool still need different `YAC_OCACHE_KEY_PREFIX` values.
+Yes. On multisite the Yac instance prefix is `YAC_OCACHE_KEY_PREFIX` + the current blog id (ids up to 9999 verbatim, larger ids a 4-hex crc32b digest), and `switch_to_blog()` re-namespaces: blogs of one install get separate namespaces and never read each other's entries. The admin page follows the same split — the cache-status totals stay machine-wide, but the shared-memory contents, the group pie and the entry inspector are scoped to (and titled with) the blog you are viewing, so one blog never lists or edits another's entries. Installs sharing one PHP pool still need different `YAC_OCACHE_KEY_PREFIX` values.
 
 = What about wp_cache_flush_group()? =
 
@@ -100,6 +100,7 @@ Yac cannot delete entries by prefix, so a group flush clears the request-level c
 
 = 1.4.0 =
 * Multisite: blogs of one install are now isolated. The Yac instance prefix becomes `YAC_OCACHE_KEY_PREFIX` + the current blog id (ids up to 9999 verbatim, larger ids a 4-hex crc32b digest) and `switch_to_blog()` re-namespaces, so one blog can no longer read another blog's cached entries (the menu/duplication reports on shared namespaces). Single-site behavior is unchanged; upgrading is a one-time cold start.
+* Multisite admin: the diagnostics now match that isolation. Cache-status totals stay machine-wide, but shared-memory contents, the group pie and the entry inspector/delete are scoped to the current blog (the contents heading is titled with the blog name), so a site admin can no longer read or delete another blog's entries. The flush confirmation now also notes that Yac recycles expired memory on its own, so a manual flush is rarely needed.
 
 = 1.3.1 =
 * Fixed the admin "Remove drop-in" action always reporting failure.
