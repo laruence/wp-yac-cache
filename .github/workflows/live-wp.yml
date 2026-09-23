@@ -271,7 +271,9 @@ jobs:
       - name: Add a second blog to the network
         run: |
           cd /tmp/wp
-          wp site create --url=http://localhost/site2
+          # subdirectory install: the new blog's path comes from --slug
+          # (not --url, which is WP-CLI's global site-context param)
+          wp site create --slug=site2 --title="Site 2"
           wp site list --field=blog_id
 
       - name: Run the live multisite test
