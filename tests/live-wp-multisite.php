@@ -117,6 +117,48 @@ ck( "shared store has blog B key ($kb)", isset( $dump[ $kb ] ) );
    the dashboard reports for this blog equals the drop-in's live prefix */
 ck( 'admin yac_ocache_key_prefix() mirrors the drop-in prefix', yac_ocache_key_prefix() === $prefix_of() );
 
+/* the admin snapshot has two scopes out of one dump(): GLOBAL aggregates
+   (entries/occupied/own) feed Cache status and must be identical no matter
+   which blog's admin is open; PER-BLOG listings (largest/groups) feed the
+   entries table and pie and must contain only that blog's keys. cache_ttl=0
+   so each call re-dumps rather than reading the per-blog cache. */
+$keys_in = function ( $list ) {
+	$out = array();
+	foreach ( (array) $list as $row ) {
+		$out[] = $row[2];
+	}
+	return $out;
+};
+$snap_a = yac_ocache_memory_snapshot( 1000, $expected_prefix( $blog_a ) );
+$snap_b = yac_ocache_memory_snapshot( 1000, $expected_prefix( $blog_b ) );
+ck( 'snapshot available for both blogs', is_array( $snap_a ) && is_array( $snap_b ) );
+if ( is_array( $snap_a ) && is_array( $snap_b ) ) {
+	/* GLOBAL aggregates identical across blogs (same machine-wide pool) */
+	ck( 'global entries aggregate is blog-independent', $snap_a['entries'] === $snap_b['entries'] );
+	ck( 'global occupied aggregate is blog-independent', $snap_a['occupied'] === $snap_b['occupied'] );
+	ck( 'global own counts both blogs (plugin-wide, not per-blog)', $snap_a['own'] === $snap_b['own'] && $snap_a['own'] >= 2 );
+
+	/* PER-BLOG listings isolated: each blog sees its own key, not the other's */
+	$list_a = $keys_in( $snap_a['largest'] );
+	$list_b = $keys_in( $snap_b['largest'] );
+	ck( "blog A entries list has blog A key ($ka)", in_array( $ka, $list_a, true ) );
+	ck( "blog A entries list EXCLUDES blog B key ($kb)", ! in_array( $kb, $list_a, true ) );
+	ck( "blog B entries list has blog B key ($kb)", in_array( $kb, $list_b, true ) );
+	ck( "blog B entries list EXCLUDES blog A key ($ka)", ! in_array( $ka, $list_b, true ) );
+
+	/* the pie (groups) is per-blog too: every listed key carries this blog's prefix */
+	$groups_all_prefixed = function ( $snap, $pfx ) use ( $keys_in ) {
+		foreach ( $keys_in( $snap['largest'] ) as $k ) {
+			if ( 0 !== strpos( $k, $pfx ) ) {
+				return false;
+			}
+		}
+		return true;
+	};
+	ck( 'blog A listings all carry the blog A prefix', $groups_all_prefixed( $snap_a, $expected_prefix( $blog_a ) ) );
+	ck( 'blog B listings all carry the blog B prefix', $groups_all_prefixed( $snap_b, $expected_prefix( $blog_b ) ) );
+}
+
 /* clean up so a re-run starts cold; each switch_to_blog re-namespaces
    independently, so no restore is needed (the script exits next) */
 switch_to_blog( $blog_a );

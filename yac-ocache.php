@@ -159,14 +159,20 @@ function yac_ocache_dropin_version() {
 	return $m[1];
 }
 
-/* the drop-in's Yac instance prefix: YAC_OCACHE_KEY_PREFIX (0-6 chars,
-   sanitized) + blog suffix. On multisite the drop-in isolates blogs by
-   appending the current blog id ("wp1:" for blog 1), so diagnostics must
-   mirror that; single-site keeps the trailing colon. It is the only
-   isolation between installs sharing one PHP pool */
-function yac_ocache_key_prefix() {
+/* sanitized YAC_OCACHE_KEY_PREFIX, no blog id, no colon: the plugin-wide
+   namespace every blog's prefix starts with */
+function yac_ocache_base_prefix() {
 	$user = defined( 'YAC_OCACHE_KEY_PREFIX' ) ? YAC_OCACHE_KEY_PREFIX : 'wp';
-	$base = preg_replace( '/[^A-Za-z0-9_]/', '', substr( (string) $user, 0, 6 ) );
+
+	return preg_replace( '/[^A-Za-z0-9_]/', '', substr( (string) $user, 0, 6 ) );
+}
+
+/* the drop-in's Yac instance prefix, which diagnostics must mirror. On
+   multisite it carries the blog id ("wp1:" for blog 1); single-site keeps
+   only the trailing colon. The only isolation between installs sharing
+   one PHP pool */
+function yac_ocache_key_prefix() {
+	$base = yac_ocache_base_prefix();
 
 	if ( function_exists( 'is_multisite' ) && is_multisite() && function_exists( 'get_current_blog_id' ) ) {
 		$blog_id = (int) get_current_blog_id();
@@ -175,6 +181,20 @@ function yac_ocache_key_prefix() {
 	}
 
 	return $base . ':';
+}
+
+/* "(blog name)" on multisite, '' on single-site: labels the per-blog scope
+   of the admin page so a network admin knows which site the entries below
+   belong to */
+function yac_ocache_blog_label() {
+	if ( ! function_exists( 'is_multisite' ) || ! is_multisite() ) {
+		return '';
+	}
+
+	$name = function_exists( 'get_blog_details' ) ? get_blog_details( null, false ) : null;
+	$name = ( $name && ! empty( $name->blogname ) ) ? $name->blogname : '';
+
+	return '' === $name ? '' : ' (' . $name . ')';
 }
 
 /* one round-trip through shared memory (set/get/delete), timed in ms;
@@ -201,11 +221,10 @@ function yac_ocache_self_test() {
 	);
 }
 
-/* every entry from Yac::dump(), paged $page_size at a time (null on
-   failure); dump(-1) materializes the entire shared-memory table as one
-   PHP array, which blows past the memory limit on a busy cache.
-   dump($limit, $offset) exists only since Yac 2.4.0 — older builds fall
-   back to the single full dump, the best they offer. */
+/* every entry from Yac::dump(), paged $page_size at a time (null on failure);
+   dump(-1) materializes the whole table as one PHP array, which blows the
+   memory limit on a busy cache. dump($limit, $offset) exists only since Yac
+   2.4.0 — older builds fall back to the single full dump */
 function yac_ocache_dump_all( $yac, $page_size = 1000 ) {
 	if ( defined( 'YAC_VERSION' ) && version_compare( YAC_VERSION, '2.4.0', '>=' ) ) {
 		$entries = array();
@@ -233,7 +252,13 @@ function yac_ocache_dump_all( $yac, $page_size = 1000 ) {
 	return is_array( $entries ) ? $entries : null;
 }
 
-/* entry-level statistics from Yac::dump() (null when unavailable) */
+/* entry-level statistics from Yac::dump() (null when unavailable). One dump
+   yields two scopes:
+   - GLOBAL aggregates (entries/bytes/occupied/own) feed Cache status, whose
+     denominators (slots_size, values_memory_size) are the machine-wide pool,
+     so they count every live entry, not just this blog's.
+   - PER-BLOG listings (largest/hottest/groups) feed the entries table and the
+     pie: only the current blog's keys, so one blog never shows another's. */
 function yac_ocache_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 	if ( isset( $GLOBALS['yac_ocache_test_snapshot'] ) ) {
 		return $GLOBALS['yac_ocache_test_snapshot'];
@@ -243,10 +268,14 @@ function yac_ocache_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 		return null;
 	}
 
-	$yac = new Yac();
+	$yac  = new Yac();
+	$base = yac_ocache_base_prefix();
+
+	/* per-blog cache key: a single global one would serve blog A's entries to B */
+	$cache_key = $prefix . 'diag:snapshot';
 
 	if ( $cache_ttl > 0 && '' !== $prefix ) {
-		$cached = $yac->get( 'diag:snapshot' );
+		$cached = $yac->get( $cache_key );
 		if ( is_array( $cached ) ) {
 			return $cached;
 		}
@@ -269,8 +298,7 @@ function yac_ocache_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 	/* the drop-in stores "<storage_prefix><group>:<key>" */
 	foreach ( $entries as $entry ) {
 		/* v_len is the serialized value length; 'size' is the padded
-		   allocation Yac actually reserves — the right measure of how
-		   much of the values pool the current entries occupy */
+		   allocation Yac actually reserves */
 		$vlen  = isset( $entry['v_len'] ) ? (int) $entry['v_len'] : 0;
 		$alloc = isset( $entry['size'] ) ? (int) $entry['size'] : 0;
 		$key   = isset( $entry['key'] ) ? $entry['key'] : '';
@@ -280,51 +308,61 @@ function yac_ocache_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 		if ( ! empty( $entry['ttl'] ) && $entry['ttl'] <= $now ) {
 			continue;
 		}
-		$total++;
 
+		/* GLOBAL aggregates: every live entry counts, regardless of blog */
+		$total++;
 		$bytes    += $vlen;
 		$occupied += $alloc;
 
-		/* diag:* keys are the plugin's own markers; keep them out of
-		   the pie chart and the entry listings */
-		$is_diag = ( '' !== $prefix && 0 === strpos( $key, $prefix . 'diag:' ) );
-		if ( ! $is_diag ) {
-			/* newer Yac builds add per-entry hits/atime to dump(); older
-			   builds return no such keys. The admin page shows the
-			   hottest tab only when hits exists — probe the first
-			   non-diag entry, it is guaranteed a find() touch if the
-			   build tracks it */
-			$largest[] = array(
-				(int) $vlen,
-				(int) $alloc,
-				$key,
-				array_key_exists( 'hits', $entry ) ? (int) $entry['hits'] : null,
-				array_key_exists( 'atime', $entry ) ? (int) $entry['atime'] : null,
-			);
-			if ( isset( $entry['hits'] ) && (int) $entry['hits'] > $hits_max ) {
-				$hits_max = (int) $entry['hits'];
+		/* "own" is plugin-wide, not per-blog: every blog's prefix is base +
+		   blog suffix + ':', so all count as ours and only foreign Yac users
+		   land in foreign_pct. The suffix is empty (single-site) or a 1-4 hex
+		   run (blog id, or the crc32b digest for ids >= 10000); matching that
+		   shape keeps a foreign prefix merely starting with base — "wp" vs
+		   "wpshop:" — out. */
+		if ( '' !== $base && 0 === strpos( $key, $base ) ) {
+			$rest  = substr( $key, strlen( $base ) );
+			$colon = strpos( $rest, ':' );
+			if ( false !== $colon ) {
+				$suffix = substr( $rest, 0, $colon );
+				if ( '' === $suffix || ( strlen( $suffix ) <= 4 && ctype_xdigit( $suffix ) ) ) {
+					$own++;
+				}
 			}
 		}
 
-		if ( $is_diag ) {
+		/* PER-BLOG listings: only this blog's keys reach the entries table and
+		   the pie; other blogs and foreign users are skipped */
+		if ( '' === $prefix || 0 !== strpos( $key, $prefix ) ) {
+			continue;
+		}
+		/* this blog's own diag markers (snapshot cache, self-test) stay out */
+		if ( 0 === strpos( $key, $prefix . 'diag:' ) ) {
 			continue;
 		}
 
-		if ( '' !== $prefix && 0 === strpos( $key, $prefix ) ) {
-			$own++;
+		/* hits/atime only exist on newer Yac builds; the hottest tab shows when
+		   the first listed entry carries them */
+		$largest[] = array(
+			(int) $vlen,
+			(int) $alloc,
+			$key,
+			array_key_exists( 'hits', $entry ) ? (int) $entry['hits'] : null,
+			array_key_exists( 'atime', $entry ) ? (int) $entry['atime'] : null,
+		);
+		if ( isset( $entry['hits'] ) && (int) $entry['hits'] > $hits_max ) {
+			$hits_max = (int) $entry['hits'];
+		}
 
-			$logical = substr( $key, strlen( $prefix ) );
-			if ( 8 === strlen( $logical ) && ctype_xdigit( $logical ) ) {
-				$group = 'hashed (long keys)';
-			} else {
-			$colon = strpos( $logical, ':' );
-				$group = ( false === $colon ) ? $logical : substr( $logical, 0, $colon );
-				if ( '' === $group ) {
-					$group = 'default';
-				}
-			}
+		$logical = substr( $key, strlen( $prefix ) );
+		if ( 8 === strlen( $logical ) && ctype_xdigit( $logical ) ) {
+			$group = 'hashed (long keys)';
 		} else {
-			$group = 'other Yac users';
+			$colon = strpos( $logical, ':' );
+			$group = ( false === $colon ) ? $logical : substr( $logical, 0, $colon );
+			if ( '' === $group ) {
+				$group = 'default';
+			}
 		}
 
 		if ( ! isset( $groups[ $group ] ) ) {
@@ -377,7 +415,7 @@ function yac_ocache_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 	}
 
 	if ( $cache_ttl > 0 && '' !== $prefix ) {
-		$yac->set( 'diag:snapshot', $result, $cache_ttl );
+		$yac->set( $cache_key, $result, $cache_ttl );
 	}
 
 	return $result;
@@ -1401,6 +1439,14 @@ function yac_ocache_ajax_entry_key() {
 		wp_send_json_error();
 	}
 
+	/* the inspector and delete act on one dump() entry, so they are bound to
+	   the current blog like the entries table: reject any key outside this
+	   blog's namespace, or a site admin could read/delete another blog's cache */
+	$prefix = yac_ocache_key_prefix();
+	if ( 0 !== strpos( $key, $prefix ) ) {
+		wp_send_json_error();
+	}
+
 	return $key;
 }
 
@@ -1622,7 +1668,7 @@ function yac_ocache_render_admin_page() {
 				<?php endif; ?>
 			</div>
 
-			<h2><?php echo esc_html( 'Shared memory contents' ); ?></h2>
+			<h2><?php echo esc_html( 'Shared memory contents' . yac_ocache_blog_label() ); ?></h2>
 			<div class="yac-ocache-panel">
 				<?php if ( null === $snapshot ) : ?>
 					<p class="yac-ocache-note"><?php echo esc_html( 'Requires the Yac extension.' ); ?></p>
@@ -1699,7 +1745,7 @@ function yac_ocache_render_admin_page() {
 									</ul>
 								<?php endforeach; ?>
 							<?php endif; ?>
-							<p class="yac-ocache-note"><?php echo esc_html( 'Occupied = Σ entry.size (padded); Content = Σ v_len; overwritten-but-unreclaimed entries slightly overstate. Flush wipes the machine’s entire shared memory.' ); ?></p>
+							<p class="yac-ocache-note"><?php echo esc_html( 'Occupied = Σ entry.size (padded); Content = Σ v_len; overwritten-but-unreclaimed entries slightly overstate. The totals count the machine’s whole pool; the pie and the top entries list only this site’s keys.' ); ?></p>
 						</div>
 					</div>
 				<?php endif; ?>
@@ -1817,7 +1863,7 @@ function yac_ocache_render_admin_page() {
 
 		<h2><?php echo esc_html( 'Actions' ); ?></h2>
 		<div class="yac-ocache-actions">
-			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('<?php echo esc_js( 'Flush the object cache? This wipes the ENTIRE Yac shared memory on this machine, including data of other Yac users sharing the PHP pool.' ); ?>')">
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('<?php echo esc_js( 'Flush the object cache? Yac recycles expired memory on its own, so a manual flush is rarely needed. It wipes the ENTIRE Yac shared memory on this machine, including data of other Yac users sharing the PHP pool.' ); ?>')">
 				<?php wp_nonce_field( 'yac_ocache_admin' ); ?>
 				<input type="hidden" name="yac_ocache_action" value="flush">
 				<button class="button button-primary"><?php echo esc_html( 'Flush object cache' ); ?></button>
