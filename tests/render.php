@@ -496,7 +496,7 @@ check( 'verdict ignores the slots_used high-water', strpos( $html, 'class="yac-o
 ob_start();
 yac_ocache_render_dashboard_widget();
 $widget_diverged = ob_get_clean();
-check( 'widget shows live entries too', strpos( $widget_diverged, '12,000 / 32,768' ) !== false );
+check( 'widget shows live entries too', strpos( $widget_diverged, '12K / 32.8K' ) !== false );
 check( 'widget labels live entries as key slots used', strpos( $widget_diverged, 'Key slots used' ) !== false );
 check( 'widget shows cache uptime', strpos( $widget_diverged, 'Running for' ) !== false && strpos( $widget_diverged, '3 d 4 h' ) !== false );
 
