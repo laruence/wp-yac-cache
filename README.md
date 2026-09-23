@@ -41,10 +41,13 @@ after `YAC_OCACHE_EMPTY_TTL` instead of occupying a slot forever; and a
 stored `false` is written as `0`, because Yac's `get()` cannot tell a stored
 false from a miss — readers comparing by value see `0`.
 
-**Multisite is a caveat, not a feature.** Keys carry no per-blog prefix, so
-blogs of one install share a namespace and `switch_to_blog()` does not
-re-namespace. Give each install its own `YAC_OCACHE_KEY_PREFIX` when sites
-sharing a PHP pool must not see each other's entries.
+**Multisite is supported via per-blog namespacing.** On multisite the Yac
+instance prefix is `YAC_OCACHE_KEY_PREFIX` + the current blog id (ids up to
+9999 verbatim, larger ids a 4-hex crc32b digest), and `switch_to_blog()`
+re-namespaces — blogs of one install never read each other's entries.
+Installs sharing one PHP pool still need different
+`YAC_OCACHE_KEY_PREFIX` values; upgrading to the per-blog namespace is a
+one-time cold start.
 
 ## Screens
 

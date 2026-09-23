@@ -183,3 +183,100 @@ jobs:
           php -d yac.enable_cli=1 -d display_errors=0 \
               -d log_errors=1 -d error_log=/tmp/wp-yac-test.log \
               "$GITHUB_WORKSPACE/tests/live-wp-debug.php"
+
+  # Real multisite end-to-end: `wp core multisite-install` builds a
+  # subdirectory network, the plugin deploys one network-wide drop-in, a
+  # second blog is added, then tests/live-wp-multisite.php proves the
+  # blogs no longer share a Yac namespace (the regression behind the
+  # "second site shows as the first / data duplication" report).
+  multisite:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: mysqli
+          tools: wp-cli, pie
+          coverage: none
+
+      # same PIE path as the single-site job: setup-php's `extensions: yac`
+      # pins an old sury build on Linux; PIE resolves the newest release
+      - name: Install yac with PIE
+        run: |
+          sudo "$(command -v pie)" install laruence/yac \
+            --no-interaction --with-php-config="$(command -v php-config)"
+
+      - name: Show the yac version under test
+        env:
+          MIN: '2.4.0'
+        run: |
+          GOT=$(php -r 'echo (string) phpversion( "yac" );')
+          export GOT
+          echo "yac ${GOT:-<not loaded>}"
+          if [ -z "$GOT" ]; then
+            echo "::error::the yac extension is not loaded"
+            exit 1
+          fi
+          if ! php -r 'exit( version_compare( getenv( "GOT" ), getenv( "MIN" ), ">=" ) ? 0 : 1 );'; then
+            echo "::error::expected yac >= $MIN, got $GOT"
+            exit 1
+          fi
+
+      - name: Install WordPress multisite
+        run: |
+          wp core download --path=/tmp/wp --version=latest
+          cd /tmp/wp
+          wp config create \
+            --dbname=wordpress --dbuser=root --dbpass=root --dbhost=127.0.0.1 \
+            --extra-php <<'EOF'
+          define( 'WP_DEBUG', true );
+          define( 'WP_DEBUG_LOG', '/tmp/wp-ms-debug.log' );
+          EOF
+          # subdirectory network (no --subdomains): wildcard DNS / hosts
+          # entries are not available in CI, and the test only needs two
+          # real blogs in one network
+          wp core multisite-install \
+            --url=http://localhost --base=/ --title="MS Test" \
+            --admin_user=admin --admin_password=admin \
+            --admin_email=admin@example.com --skip-email
+
+      - name: Install and activate the plugin network-wide
+        run: |
+          bash scripts/build-release.sh /tmp/yac-obj-cache.zip
+          mkdir -p /tmp/wp/wp-content/plugins/yac-ocache
+          unzip -o /tmp/yac-obj-cache.zip -d /tmp/wp/wp-content/plugins/yac-ocache
+          cd /tmp/wp
+          # network activation runs the hook once and deploys the single
+          # network-wide object-cache.php that every blog loads
+          wp plugin activate --network yac-ocache
+          test -f /tmp/wp/wp-content/object-cache.php
+
+      - name: Add a second blog to the network
+        run: |
+          cd /tmp/wp
+          wp site create --url=http://localhost/site2
+          wp site list --field=blog_id
+
+      - name: Run the live multisite test
+        run: |
+          cd /tmp/wp
+          php -d yac.enable_cli=1 -d display_errors=0 \
+              -d log_errors=1 -d error_log=/tmp/wp-yac-ms.log \
+              "$GITHUB_WORKSPACE/tests/live-wp-multisite.php"

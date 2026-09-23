@@ -3,7 +3,7 @@
  * Plugin Name: Yac Object Cache
  * Plugin URI: https://github.com/laruence/wp-yac-cache
  * Description: Yac (lock-free shared memory) backed object cache for WordPress. Auto-deploys the object-cache.php drop-in on activation. No external servers: the cache lives in shared memory accessible to all PHP workers.
- * Version: 1.3.1
+ * Version: 1.4.0
  * Requires at least: 5.6
  * Requires PHP: 7.0
  * Author: Laruence <laruence@php.net>
@@ -16,7 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'YAC_OCACHE_VERSION', '1.3.1' );
+define( 'YAC_OCACHE_VERSION', '1.4.0' );
 define( 'YAC_OCACHE_PLUGIN_FILE', __FILE__ );
 define( 'YAC_OCACHE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'YAC_OCACHE_DROPIN_SOURCE', __DIR__ . '/object-cache.php' );
@@ -160,13 +160,21 @@ function yac_ocache_dropin_version() {
 }
 
 /* the drop-in's Yac instance prefix: YAC_OCACHE_KEY_PREFIX (0-6 chars,
-   sanitized) + ':'. The drop-in builds the same string from the same
-   wp-config.php constant, so nothing to sync; it is the only isolation
-   between installs sharing one PHP pool */
+   sanitized) + blog suffix. On multisite the drop-in isolates blogs by
+   appending the current blog id ("wp1:" for blog 1), so diagnostics must
+   mirror that; single-site keeps the trailing colon. It is the only
+   isolation between installs sharing one PHP pool */
 function yac_ocache_key_prefix() {
 	$user = defined( 'YAC_OCACHE_KEY_PREFIX' ) ? YAC_OCACHE_KEY_PREFIX : 'wp';
+	$base = preg_replace( '/[^A-Za-z0-9_]/', '', substr( (string) $user, 0, 6 ) );
 
-	return preg_replace( '/[^A-Za-z0-9_]/', '', substr( (string) $user, 0, 6 ) ) . ':';
+	if ( function_exists( 'is_multisite' ) && is_multisite() && function_exists( 'get_current_blog_id' ) ) {
+		$blog_id = (int) get_current_blog_id();
+
+		return $base . ( $blog_id < 10000 ? $blog_id : substr( hash( 'crc32b', (string) $blog_id ), -4 ) ) . ':';
+	}
+
+	return $base . ':';
 }
 
 /* one round-trip through shared memory (set/get/delete), timed in ms;
@@ -1064,7 +1072,7 @@ function yac_ocache_config_rows() {
 				defined( 'YAC_OCACHE_KEY_PREFIX' ) ? '' : ' (' . 'default' . ')'
 			),
 			'wp-config.php',
-			'storage key prefix, 0-6 chars; the only isolation between installs sharing one PHP pool — use a different one per site; multisite blogs share it',
+			'storage key prefix, 0-6 chars; isolates installs sharing one PHP pool. On multisite the current blog id is appended automatically, isolating the blogs of one install',
 		),
 		array(
 			"define( 'YAC_OCACHE_EMPTY_TTL', … )",

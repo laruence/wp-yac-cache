@@ -20,6 +20,10 @@ error_reporting( E_ALL );
 $GLOBALS['table_prefix'] = 'wp_';
 $GLOBALS['blog_id']      = 1;
 
+function get_current_blog_id() {
+	return (int) $GLOBALS['blog_id'];
+}
+
 function apply_filters( $hook, $value ) {
 	return $value;
 }
@@ -356,16 +360,39 @@ if ( $yac_on ) {
 }
 
 // ---------------------------------------------------------------------------
-// switch_to_blog: keys carry no blog prefix anymore; blogs intentionally
-// share the namespace (separate installs/prefixes when they must not)
+// switch_to_blog: multisite re-namespaces the Yac instance prefix per blog
+// (single-site keeps sharing; see the prefix section below)
 // ---------------------------------------------------------------------------
 $GLOBALS['yac_ocache_test_multisite'] = true;
 wp_cache_switch_to_blog( 1 );
 wp_cache_set( 'blogkey', 'blog1' );
 wp_cache_switch_to_blog( 2 );
-check( 'blogs share the namespace by design (no per-blog prefix)', wp_cache_get( 'blogkey' ) === 'blog1' );
+/* the instance prefix itself carries the blog id (not just behavior);
+   runtime-only mode never re-namespaces, so the constructed prefix
+   (single-site: 'wp:') is kept */
+$p = new ReflectionProperty( 'Yac_Ocache_Object_Cache', 'storage_prefix' );
+if ( PHP_VERSION_ID < 80100 ) {
+	$p->setAccessible( true );
+}
+$expected_prefix = $yac_on ? 'wp2:' : 'wp:';
+check( 'instance prefix carries the blog id', $p->getValue( $GLOBALS['wp_object_cache'] ) === $expected_prefix );
+/* blog ids above 9999 fall back to a 4-hex crc32b digest (prefix stays 48-byte safe) */
+if ( $yac_on ) {
+	wp_cache_switch_to_blog( 123456 );
+	check( 'large blog id hashed into the prefix', $p->getValue( $GLOBALS['wp_object_cache'] ) === 'wp' . substr( hash( 'crc32b', '123456' ), -4 ) . ':' );
+	wp_cache_switch_to_blog( 2 );
+}
+check( 'blogs are isolated (no cross-blog leak)', wp_cache_get( 'blogkey' ) === false );
+check( 'same key stored for blog 2 stays local', wp_cache_set( 'blogkey', 'blog2' ) && wp_cache_get( 'blogkey' ) === 'blog2' );
 wp_cache_switch_to_blog( 1 );
-check( 'switching back keeps access', wp_cache_get( 'blogkey' ) === 'blog1' );
+if ( $yac_on ) {
+	/* shared memory outlives the per-switch request-cache clear */
+	check( 'switching back keeps blog 1 access (shared store)', wp_cache_get( 'blogkey' ) === 'blog1' );
+} else {
+	/* runtime-only: the request cache is the only store and is cleared on
+	   switch, so blog 1's value is gone (isolation over hit rate) */
+	check( 'switching back misses in runtime-only mode', wp_cache_get( 'blogkey' ) === false );
+}
 $GLOBALS['yac_ocache_test_multisite'] = false;
 
 // ---------------------------------------------------------------------------

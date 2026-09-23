@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.3.1
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -90,13 +90,16 @@ Yes. `wp_cache_flush()` calls `Yac::flush()`, which wipes the entire shared memo
 
 = Multisite? =
 
-Yes, with a caveat: keys carry no per-blog prefix, so blogs of one install share the namespace and `switch_to_blog()` does not re-namespace. Give each install its own `YAC_OCACHE_KEY_PREFIX` when sites sharing a PHP pool must not see each other's entries.
+Yes. On multisite the Yac instance prefix is `YAC_OCACHE_KEY_PREFIX` + the current blog id (ids up to 9999 verbatim, larger ids a 4-hex crc32b digest), and `switch_to_blog()` re-namespaces: blogs of one install get separate namespaces and never read each other's entries. Installs sharing one PHP pool still need different `YAC_OCACHE_KEY_PREFIX` values.
 
 = What about wp_cache_flush_group()? =
 
 Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so core does not rely on it.
 
 == Changelog ==
+
+= 1.4.0 =
+* Multisite: blogs of one install are now isolated. The Yac instance prefix becomes `YAC_OCACHE_KEY_PREFIX` + the current blog id (ids up to 9999 verbatim, larger ids a 4-hex crc32b digest) and `switch_to_blog()` re-namespaces, so one blog can no longer read another blog's cached entries (the menu/duplication reports on shared namespaces). Single-site behavior is unchanged; upgrading is a one-time cold start.
 
 = 1.3.1 =
 * Fixed the admin "Remove drop-in" action always reporting failure.

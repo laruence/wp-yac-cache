@@ -16,10 +16,12 @@
  *   occupying a slot until kicked. YAC_OCACHE_EMPTY_TTL (default 21600s)
  *   caps their lifetime instead: they stay shared, expire after the TTL
  *   (default 6 hours) and are re-queried on re-read. Set 0 to disable.
- * - Keys carry no per-blog prefix: single-node installs are the target
- *   and per-site isolation lives in YAC_OCACHE_KEY_PREFIX instead. Installs
- *   sharing one PHP pool must use different prefixes; multisite blogs
- *   share the namespace by design.
+ * - Per-blog isolation lives in the Yac instance prefix: on multisite it
+ *   is "<YAC_OCACHE_KEY_PREFIX><blog_id>" (id up to 9999 verbatim, larger
+ *   ids a 4-digit crc32b hash), so switch_to_blog() re-namespaces and one
+ *   install's blogs never read each other's entries. Single-site keeps
+ *   "<YAC_OCACHE_KEY_PREFIX>". Installs sharing one PHP pool must still
+ *   use different YAC_OCACHE_KEY_PREFIX values.
  * - wp_cache_flush() calls Yac::flush() and clears the ENTIRE shared
  *   memory on this machine, including data of other Yac users.
  * - Values are stored raw so Yac can embed small scalars (null,
@@ -46,7 +48,7 @@ if ( ! defined( 'YAC_OCACHE_KEY_PREFIX' ) ) {
 }
 
 if ( ! defined( 'YAC_OCACHE_DROPIN_VERSION' ) ) {
-	define( 'YAC_OCACHE_DROPIN_VERSION', '1.3.1' );
+	define( 'YAC_OCACHE_DROPIN_VERSION', '1.4.0' );
 }
 
 if ( ! defined( 'YAC_OCACHE_EMPTY_TTL' ) ) {
@@ -223,7 +225,9 @@ class Yac_Ocache_Object_Cache {
 
 	private $non_persistent_groups = array();
 
-	private $storage_prefix = ''; /* Yac instance prefix; the only per-site isolation */
+	private $base_prefix = ''; /* sanitized YAC_OCACHE_KEY_PREFIX, no trailing ':' */
+	private $storage_prefix = ''; /* base prefix + multisite blog suffix; the only per-blog isolation */
+	private $current_blog = null; /* blog id the instance is namespaced for (multisite) */
 	private $logical_key_budget = 34; /* bytes left after the instance prefix */
 
 	public $cache_hits = 0;
@@ -251,12 +255,13 @@ class Yac_Ocache_Object_Cache {
 			'slow-ops'     => 0,
 		);
 
-		/* the prefix is the only isolation between installs sharing one
-		   PHP pool — use a different YAC_OCACHE_KEY_PREFIX per site. Keys
-		   carry no per-blog prefix; multisite blogs share the namespace
-		   by design. Budget = key bytes left inside YAC_MAX_KEY_LEN
-		   (48 incl. prefix) */
-		$this->storage_prefix = substr( preg_replace( '/[^A-Za-z0-9_]/', '', (string) YAC_OCACHE_KEY_PREFIX ), 0, 6 ) . ':';
+		/* the base prefix isolates installs sharing one PHP pool — use a
+		   different YAC_OCACHE_KEY_PREFIX per site. On multisite the
+		   blog id joins the instance prefix, isolating blogs of one
+		   install; see yac_blog_suffix(). Budget = key bytes left inside
+		   YAC_MAX_KEY_LEN (48 incl. instance prefix) */
+		$this->base_prefix    = substr( preg_replace( '/[^A-Za-z0-9_]/', '', (string) YAC_OCACHE_KEY_PREFIX ), 0, 6 );
+		$this->storage_prefix = $this->base_prefix . $this->yac_blog_suffix();
 
 		if ( defined( 'YAC_MAX_KEY_LEN' ) ) {
 			$this->logical_key_budget = max( 8, YAC_MAX_KEY_LEN - strlen( $this->storage_prefix ) );
@@ -281,6 +286,27 @@ class Yac_Ocache_Object_Cache {
 			$this->yac           = null;
 			$this->yac_available = false;
 		}
+	}
+
+	/* per-blog instance prefix suffix: on multisite the blog id joins the
+	   base prefix (id ≤9999 verbatim, larger a 4-hex crc32b digest) so
+	   each blog gets its own Yac namespace. Single-site keeps the bare
+	   trailing colon. */
+	private function yac_blog_suffix( $blog_id = null ) {
+		if ( ! function_exists( 'is_multisite' ) || ! is_multisite() ) {
+			return ':';
+		}
+
+		if ( null === $blog_id ) {
+			$blog_id = null !== $this->current_blog ? $this->current_blog : ( function_exists( 'get_current_blog_id' ) ? (int) get_current_blog_id() : 1 );
+		}
+		$blog_id = (int) $blog_id;
+
+		if ( $blog_id < 10000 ) {
+			return $blog_id . ':';
+		}
+
+		return substr( hash( 'crc32b', (string) $blog_id ), -4 ) . ':';
 	}
 
 	/* miss sentinel: Yac::get() returns false for a missing key in every
@@ -649,14 +675,35 @@ class Yac_Ocache_Object_Cache {
 		return $values;
 	}
 
-	/* keys carry no blog prefix anymore; blogs intentionally share the
-	   namespace (use separate installs/prefixes when they must not) */
+	/* multisite: re-namespace the Yac instance for the target blog. The
+	   request-level cache is cleared with it — a value read under blog A
+	   must not be served to blog B in the same request, with or without
+	   shared memory. */
 	public function switch_to_blog( $blog_id ) {
-		return true;
+		if ( null !== $this->current_blog && (int) $blog_id === $this->current_blog ) {
+			return true;
+		}
+
+		$this->current_blog = (int) $blog_id;
+		$this->cache        = array();
+
+		if ( ! $this->yac_available ) {
+			return true;
+		}
+
+		$suffix = $this->yac_blog_suffix( $blog_id );
+		if ( $this->storage_prefix === $this->base_prefix . $suffix ) {
+			return true;
+		}
+
+		$this->storage_prefix = $this->base_prefix . $suffix;
+		$this->init_yac();
+		return $this->yac_available;
 	}
 
-	/* accepted for API compatibility only: keys carry no per-blog
-	   prefix, so the global-vs-per-blog distinction has no effect */
+	/* accepted for API compatibility only: per-blog isolation comes from
+	   the instance prefix (multisite appends the blog id), not from the
+	   global-vs-per-blog group distinction */
 	public function add_global_groups( $groups ) {
 		return true;
 	}
