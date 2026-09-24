@@ -394,6 +394,23 @@ function yac_ocache_memory_snapshot( $top = 10, $prefix = '', $cache_ttl = 0 ) {
 	   hottest tab only when it came back on the first probed entry */
 	$has_meta = ! empty( $largest ) && null !== $largest[0][3];
 
+	/* Σ size can exceed the pool, so cap it at the pool. The value pool is a
+	   ring: once every segment is full an insert overwrites it from the start
+	   (Yac counts this as a 'recycle'), but the slot of an overwritten entry
+	   stays in the slot table — only a kick or a TTL expiry removes it. dump()
+	   therefore still reports those slots as live, carrying the allocation size
+	   of a block that no longer exists, and summing them counts the same physical
+	   bytes more than once. Measured on a 100M pool: 36% of live slots were
+	   stale and Σ size reached 156% of the pool. The true occupancy is capped at
+	   the pool by construction, so clamping gives the closest figure dump() can
+	   express without re-validating each block. */
+	if ( $occupied > 0 ) {
+		$info = $yac->info();
+		if ( is_array( $info ) && isset( $info['values_memory_size'] ) && (int) $info['values_memory_size'] > 0 ) {
+			$occupied = min( $occupied, (int) $info['values_memory_size'] );
+		}
+	}
+
 	$result = array(
 		'entries'  => $total,
 		'bytes'    => $bytes,
