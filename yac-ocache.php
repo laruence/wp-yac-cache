@@ -1849,8 +1849,8 @@ function yac_ocache_render_admin_page() {
 					<td><code><?php echo esc_html( ini_get( 'yac.values_memory_size' ) ); ?></code> — <?php echo esc_html( 'values pool; raise when occupied approaches it' ); ?></td>
 				</tr>
 				<tr>
-					<td><code>yac.serializer</code></td>
-					<td><code><?php echo esc_html( ini_get( 'yac.serializer' ) ?: 'php' ); ?></code></td>
+					<td><code>Serializer</code></td>
+					<td><code>built-in binary format: stdClass native (T_STDCLASS 0x31), other classes fall back to PHP serialization</code> — <code>pluggable <code>yac.serializer</code> removed in Yac 3.0</code></td>
 				</tr>
 				<tr>
 					<td><code>yac.compress_threshold</code></td>

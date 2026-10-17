@@ -233,27 +233,12 @@ class Yac_Ocache_Object_Cache {
 	public $cache_hits = 0;
 	public $cache_misses = 0;
 
-	public $group_ops = array();
-	private $stats = array();
-	private $time_start = 0;
-	private $time_total = 0;
-
-	private $slow_op_microseconds = 0.005;
 
 	/* keys written by this request; Yac::set() may return false on CAS
 	   contention even though the value landed, so don't rewrite those */
 	private $written = array();
 
 	public function __construct() {
-		$this->stats = array(
-			'get'          => 0,
-			'get_local'    => 0,
-			'set'          => 0,
-			'add'          => 0,
-			'delete'       => 0,
-			'delete_local' => 0,
-			'slow-ops'     => 0,
-		);
 
 		/* the base prefix isolates installs sharing one PHP pool — use a
 		   different YAC_OCACHE_KEY_PREFIX per site. On multisite the
@@ -493,7 +478,6 @@ class Yac_Ocache_Object_Cache {
 			}
 			$found = $this->cache[ $key ]['found'];
 
-			$this->group_ops_stats( 'get_local', $key, $group, null, null, 'local' );
 
 			return $value;
 		}
@@ -502,14 +486,11 @@ class Yac_Ocache_Object_Cache {
 			$this->set_internal_cache( $key, false, $this->sanitize_group( $group ), false );
 			$found = false;
 
-			$this->group_ops_stats( 'get_local', $key, $group, null, null, 'not_in_local' );
 
 			return false;
 		}
 
-		$this->timer_start();
 		$raw = $this->yac->get( $key );
-		$elapsed = $this->timer_stop();
 
 		if ( false === $raw ) {
 			$found = false;
@@ -528,10 +509,7 @@ class Yac_Ocache_Object_Cache {
 		$this->set_internal_cache( $key, $value, $this->sanitize_group( $group ), $found );
 
 		if ( ! $found ) {
-			$this->group_ops_stats( 'get', $key, $group, null, $elapsed, 'not_in_yac' );
 		} else {
-			$size = $this->get_data_size( $value );
-			$this->group_ops_stats( 'get', $key, $group, $size, $elapsed, 'yac' );
 		}
 
 		return $value;
@@ -556,14 +534,11 @@ class Yac_Ocache_Object_Cache {
 					continue;
 				}
 
-				$this->timer_start();
 				$raw = $this->yac->get( $key );
-				$elapsed = $this->timer_stop();
 
 				if ( false === $raw ) {
 					$return[ $key ] = false;
 					$this->set_internal_cache( $key, false, $this->sanitize_group( $group ), false );
-					$this->group_ops_stats( 'get', $key, $group, null, $elapsed, 'not_in_yac' );
 				} else {
 					$value = $raw;
 					if ( null === $value ) {
@@ -571,12 +546,10 @@ class Yac_Ocache_Object_Cache {
 					}
 					$return[ $key ] = is_object( $value ) ? clone $value : $value;
 					$this->set_internal_cache( $key, $value, $this->sanitize_group( $group ), true );
-					$this->group_ops_stats( 'get', $key, $group, $this->get_data_size( $value ), $elapsed, 'yac' );
 				}
 			}
 		}
 
-		$this->increment_stat( 'get_multi' );
 
 		return $return;
 	}
@@ -639,7 +612,6 @@ class Yac_Ocache_Object_Cache {
 
 		if ( in_array( $group, $this->non_persistent_groups, true ) || ! $this->yac_available ) {
 			$this->cache[ $key ]['found'] = true;
-			$this->group_ops_stats( 'set_local', $key, $group, null, null );
 
 			return true;
 		}
@@ -650,17 +622,13 @@ class Yac_Ocache_Object_Cache {
 		   path and live inside the slot itself, no value block; false
 		   arrived already coerced to 0 (a stored false would read back
 		   like a miss) */
-		$this->timer_start();
 		$this->yac->set( $key, $data, $ttl );
-		$elapsed = $this->timer_stop();
 
 		/* even if set() returned false (CAS contention), the value is very
 		   likely in there; treat it as written for this request */
 		$this->written[ $key ] = true;
 		$this->cache[ $key ]['found'] = true;
 
-		$size = $this->get_data_size( $data );
-		$this->group_ops_stats( 'set', $key, $group, $size, $elapsed );
 
 		return true;
 	}
@@ -802,94 +770,5 @@ class Yac_Ocache_Object_Cache {
 		$this->set_internal_cache( $key, $value, $group, true );
 	}
 
-	public function stats() {
-		echo '<h3>This request</h3>';
-		echo '<ul class="yac-ocache-op-list">';
-		echo '<li><span>Backend</span><strong>' . ( $this->yac_available ? 'shared memory' : 'runtime-only fallback' ) . '</strong></li>';
-		echo '<li><span>Query time</span><strong>' . esc_html( number_format( $this->time_total * 1000, 1 ) ) . ' ms</strong></li>';
-		echo '</ul>';
 
-		echo '<h3>Operations</h3>';
-		echo '<ul class="yac-ocache-op-list">';
-		foreach ( $this->stats as $stat => $n ) {
-			if ( empty( $n ) || 'slow-ops' === $stat ) {
-				continue;
-			}
-			echo '<li><span>' . esc_html( str_replace( '_', ' ', $stat ) ) . '</span><strong>' . esc_html( number_format_i18n( $n ) ) . '</strong></li>';
-		}
-		echo '</ul>';
-
-		if ( ! empty( $this->stats['slow-ops'] ) ) {
-			echo '<p class="yac-ocache-note">' . esc_html( sprintf( '%d slow operations (> 5 ms)', $this->stats['slow-ops'] ) ) . '</p>';
-		}
-
-		if ( $this->yac_available ) {
-			$info = $this->yac->info();
-			if ( is_array( $info ) ) {
-				echo '<h3>Shared storage (all workers)</h3>';
-				echo '<ul class="yac-ocache-op-list">';
-				echo '<li><span>Slots in use</span><strong>' . esc_html( number_format_i18n( $info['slots_used'] ) . ' / ' . number_format_i18n( $info['slots_size'] ) ) . '</strong></li>';
-				echo '<li><span>Values memory pool</span><strong>' . esc_html( size_format( $info['values_memory_size'], 2 ) ) . '</strong></li>';
-				echo '</ul>';
-			}
-		}
-
-		if ( ! empty( $this->group_ops ) ) {
-			$max = 1;
-			foreach ( $this->group_ops as $ops ) {
-				$max = max( $max, count( $ops ) );
-			}
-
-			echo '<h3>Operations by group</h3>';
-			echo '<p class="yac-ocache-note">' . esc_html( 'Cache operations of this request, grouped by WordPress cache group (options, posts, users, …). The bar shows each group’s share of the shared-memory traffic; long bars point at the groups this page load touched the most.' ) . '</p>';
-			echo '<ul class="yac-ocache-group-bars">';
-			foreach ( $this->group_ops as $group => $ops ) {
-				echo '<li><span class="yac-ocache-group-name" title="' . esc_attr( $group ) . '">' . esc_html( $group ) . '</span>'
-					. '<span class="yac-ocache-group-bar-track"><span class="yac-ocache-group-bar" style="width:' . esc_attr( round( count( $ops ) / $max * 100 ) ) . '%"></span></span>'
-					. '<strong>' . esc_html( number_format_i18n( count( $ops ) ) ) . '</strong></li>';
-			}
-			echo '</ul>';
-		}
-	}
-
-	public function increment_stat( $field, $num = 1 ) {
-		if ( ! isset( $this->stats[ $field ] ) ) {
-			$this->stats[ $field ] = $num;
-		} else {
-			$this->stats[ $field ] += $num;
-		}
-	}
-
-	private function group_ops_stats( $op, $keys, $group, $size, $time, $comment = '' ) {
-		$this->increment_stat( $op );
-
-		if ( strpos( $op, '_local' ) !== false ) {
-			return;
-		}
-
-		if ( $time > $this->slow_op_microseconds && 'get_multi' !== $op ) {
-			$this->increment_stat( 'slow-ops' );
-		}
-
-		$this->group_ops[ $group ][] = array( $op, $keys, $size, $time, $comment );
-	}
-
-	private function timer_start() {
-		$this->time_start = microtime( true );
-		return true;
-	}
-
-	private function timer_stop() {
-		$time_total = microtime( true ) - $this->time_start;
-		$this->time_total += $time_total;
-		return $time_total;
-	}
-
-	private function get_data_size( $data ) {
-		if ( is_string( $data ) ) {
-			return strlen( $data );
-		}
-
-		return strlen( serialize( $data ) );
-	}
 }

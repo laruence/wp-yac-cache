@@ -182,19 +182,15 @@ yac.keys_memory_size = 16M     ; ~128K slots (~32K per 4M)
 yac.values_memory_size = 64M   ; raise for large sites (alloptions!)
 ```
 
-> **Do not set `yac.serializer` to `json`.** WordPress's object cache stores
-> PHP objects (`WP_Post`, `WP_Term`, option values, …), and a JSON serializer
-> cannot round-trip them: objects come back as arrays, and core code feeding
-> an array where an object is expected dies with a fatal error (e.g.
-> `get_object_vars(): Argument #1 must be of type object, array given`).
-> It also corrupts binary data (`json_encode` fails on non-UTF-8 bytes, so
-> such values are silently dropped).
->
-> Leave the default `php` serializer. If you built Yac with
-> `--enable-json` and set `yac.serializer=json`, WordPress breaks the moment
-> the first cached object is read back. Note that an unknown serializer name
-> in the ini falls back to `php` silently — check `php --ri yac`
-> (`Serializer =>`) for what is actually in effect, not what the ini says.
+> **Serialization is built-in and fixed (Yac 3.0).** The pluggable
+> `yac.serializer` ini (php/json) was removed; Yac now ships its own binary
+> wire format. `stdClass` (and subclasses) is encoded natively (tag 0x31),
+> so WordPress' stdClass-heavy values (post objects, option arrays) round-trip
+> with zero object loss. Other class instances (e.g. `WP_Post`, `WP_Term`)
+> that do not fit the stdClass path fall back to PHP's native serialization,
+> which preserves their class identity and properties. Nothing to configure:
+> set `yac.serializer` in the ini today is ignored (unknown ini key), and the
+> old `--enable-json` build flag no longer exists.
 
 Why `YAC_OCACHE_EMPTY_TTL` exists: bots probe unbounded one-off URLs and
 WordPress mints a cache entry per query (`get_page_by_path:<md5>`, comment
