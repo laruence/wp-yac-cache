@@ -1848,10 +1848,13 @@ function yac_ocache_render_admin_page() {
 					<td><code>yac.values_memory_size</code></td>
 					<td><code><?php echo esc_html( ini_get( 'yac.values_memory_size' ) ); ?></code> — <?php echo esc_html( 'values pool; raise when occupied approaches it' ); ?></td>
 				</tr>
+				<?php
+					if (version_compare( YAC_VERSION, '3.0', '<' ) ) : ?>
 				<tr>
-					<td><code>Serializer</code></td>
-					<td><code>built-in binary format: stdClass native (T_STDCLASS 0x31), other classes fall back to PHP serialization</code> — <code>pluggable <code>yac.serializer</code> removed in Yac 3.0</code></td>
+					<td><code>yac.serializer</code></td>
+					<td><code><?php echo esc_html( ini_get( 'yac.serializer' ) ?: 'php' ); ?></code></td>
 				</tr>
+				<?php endif; ?>
 				<tr>
 					<td><code>yac.compress_threshold</code></td>
 					<td><code><?php echo esc_html( ini_get( 'yac.compress_threshold' ) ?: '-1' ); ?></code> — <?php echo esc_html( 'values larger than this (bytes) are fastlz-compressed; -1 disables' ); ?></td>

@@ -182,15 +182,15 @@ yac.keys_memory_size = 16M     ; ~128K slots (~32K per 4M)
 yac.values_memory_size = 64M   ; raise for large sites (alloptions!)
 ```
 
-> **Serialization is built-in and fixed (Yac 3.0).** The pluggable
-> `yac.serializer` ini (php/json) was removed; Yac now ships its own binary
-> wire format. `stdClass` (and subclasses) is encoded natively (tag 0x31),
-> so WordPress' stdClass-heavy values (post objects, option arrays) round-trip
-> with zero object loss. Other class instances (e.g. `WP_Post`, `WP_Term`)
-> that do not fit the stdClass path fall back to PHP's native serialization,
-> which preserves their class identity and properties. Nothing to configure:
-> set `yac.serializer` in the ini today is ignored (unknown ini key), and the
-> old `--enable-json` build flag no longer exists.
+> **Yac 3.0: serialization is built-in.** The pluggable `yac.serializer`
+> ini (php/json) was removed.
+>
+> **Older Yac (2.x):** keep the default `php` serializer. Do not set
+> `yac.serializer=json` — WordPress stores PHP objects (`WP_Post`,
+> `WP_Term`, option values, …), and a JSON serializer cannot round-trip
+> them.
+> An unknown serializer name falls back to `php` silently — check
+> `php --ri yac` (`Serializer =>`) for what is actually in effect.
 
 Why `YAC_OCACHE_EMPTY_TTL` exists: bots probe unbounded one-off URLs and
 WordPress mints a cache entry per query (`get_page_by_path:<md5>`, comment
