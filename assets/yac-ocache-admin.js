@@ -68,6 +68,11 @@
 				if ( d.access.embedded != null ) {
 					rows.push( '<li><span>Embedded in slot</span><strong>' + ( d.access.embedded ? 'yes' : 'no' ) + '</strong></li>' );
 				}
+				if ( d.access.loc != null && d.access.loc !== undefined ) {
+					/* Yac 3.0+: loc 0 = value block, 1 = embedded (val word), 2 = inline */
+					var locNames = [ 'block', 'embedded', 'inline' ];
+					rows.push( '<li><span>Location</span><strong>' + ( locNames[ d.access.loc ] || 'block' ) + '</strong></li>' );
+				}
 			}
 			metaEl.innerHTML = rows.join( '' );
 			if ( d.gone ) {

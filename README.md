@@ -74,7 +74,7 @@ diagnosis — including when *not* to add memory.
 What the shared memory actually holds: keys-by-group pie, occupancy totals
 and the largest (or hottest) entries. Every key clicks through to the entry
 inspector — deserialized value, padded size, expiry, delete, plus hits and
-embedded-in-slot on newer yac builds.
+storage location: embedded-in-slot on Yac 2.4.x, block / inline on Yac 3.0+.
 
 Below those: **Configuration** (wp-config knobs with current values),
 **Diagnostics** (versions, PHP/Yac runtime facts) and **Actions** (flush /

@@ -277,10 +277,18 @@ if ( $yac_on ) {
 			&& $by_key['wp:default:emb_false']['embedded']
 			&& $by_key['wp:default:emb_null']['embedded'] );
 		check( 'embedded entries use no value-block memory', 0 === (int) $by_key['wp:default:emb_int']['size'] );
+	} elseif ( isset( $by_key['wp:default:emb_int']['loc'] ) ) {
+		/* Yac 3.0+ renamed the boolean `embedded` to an int `loc` */
+		$keys = array( 'wp:default:emb_int', 'wp:default:emb_zero', 'wp:default:emb_str', 'wp:default:emb_empty_str', 'wp:default:emb_empty_arr', 'wp:default:emb_false', 'wp:default:emb_null' );
+		$all = true;
+		foreach ( $keys as $k ) {
+			$all = $all && 1 === (int) $by_key[ $k ]['loc']; // YAC_LOC_VALWORD: small scalars live in the slot
+		}
+		check( 'small scalars stored in the slot value word (Yac 3.0+ loc)', $all );
+		check( 'in-slot entries use no value-block memory', 0 === (int) $by_key['wp:default:emb_int']['size'] );
 	} else {
 		echo "  skip embedded-flag assertions (Yac build without dump metadata)\n";
-	}
-} else {
+	}} else {
 	echo "  skip raw/embedded storage assertions (Yac not active)\n";
 }
 

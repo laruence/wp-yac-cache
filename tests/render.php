@@ -617,6 +617,12 @@ $fake->store['wp:options:alloptions']['embedded'] = true;
 $d = yac_ocache_entry_detail( $fake, 'wp:options:alloptions' );
 check( 'inspector groups supported access metadata', isset( $d['access'] ) && 1234567890 === $d['access']['atime'] && 42 === $d['access']['hits'] && true === $d['access']['embedded'] );
 
+/* Yac 3.0+ reports an int `loc` instead of the boolean `embedded` */
+unset( $fake->store['wp:options:alloptions']['embedded'] );
+$fake->store['wp:options:alloptions']['loc'] = 2; // YAC_LOC_INLINE
+$d = yac_ocache_entry_detail( $fake, 'wp:options:alloptions' );
+check( 'inspector passes through Yac 3.0 loc', 2 === $d['access']['loc'] && ! array_key_exists( 'embedded', $d['access'] ) );
+
 /* compressed entries (Yac >= 2.4.0 dumps): c_len is the stored compressed
    payload, v_len the original uncompressed length */
 $fake->store['wp:options:alloptions']['c_len'] = 30000;

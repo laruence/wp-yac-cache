@@ -1424,7 +1424,8 @@ function yac_ocache_entry_detail( $yac, $key ) {
 		'truncated'   => $truncated,
 	);
 
-	if ( $meta && ( array_key_exists( 'atime', $meta ) || array_key_exists( 'hits', $meta ) || array_key_exists( 'embedded', $meta ) ) ) {
+	if ( $meta && ( array_key_exists( 'atime', $meta ) || array_key_exists( 'hits', $meta )
+		|| array_key_exists( 'embedded', $meta ) || array_key_exists( 'loc', $meta ) ) ) {
 		$detail['access'] = array();
 		if ( array_key_exists( 'atime', $meta ) ) {
 			$detail['access']['atime'] = (int) $meta['atime'];
@@ -1432,8 +1433,15 @@ function yac_ocache_entry_detail( $yac, $key ) {
 		if ( array_key_exists( 'hits', $meta ) ) {
 			$detail['access']['hits'] = (int) $meta['hits'];
 		}
+		/* Yac 2.4.0-2.4.2 reports a boolean `embedded`; Yac 3.0+
+		   reports an int `loc` instead */
 		if ( array_key_exists( 'embedded', $meta ) ) {
 			$detail['access']['embedded'] = (bool) $meta['embedded'];
+		}
+		/* Yac 3.0+ dump() reports an int `loc` (YAC_LOC_BLOCK=0 block,
+		   YAC_LOC_VALWORD=1 embed, YAC_LOC_INLINE=2 inline) */
+		if ( array_key_exists( 'loc', $meta ) ) {
+			$detail['access']['loc'] = (int) $meta['loc'];
 		}
 	}
 
