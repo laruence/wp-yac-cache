@@ -288,9 +288,10 @@ if ( $yac_on ) {
 		check( 'in-slot entries use no value-block memory', 0 === (int) $by_key['wp:default:emb_int']['size'] );
 	} else {
 		echo "  skip embedded-flag assertions (Yac build without dump metadata)\n";
-	}} else {
-	echo "  skip raw/embedded storage assertions (Yac not active)\n";
-}
+	}
+	} else {
+		echo "  skip raw/embedded storage assertions (Yac not active)\n";
+	}
 
 // ---------------------------------------------------------------------------
 // YAC_OCACHE_EMPTY_TTL: empty arrays (negative cache results) are shared
