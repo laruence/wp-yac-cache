@@ -65,9 +65,8 @@ yac.values_memory_size = 64M    ; raise for large sites (big alloptions)
 **Optional wp-config switches**
 
 `
-define( 'YAC_OCACHE_KEY_PREFIX', 'ab' ); // default wp; give each install its own when sites share one PHP pool
-define( 'YAC_OCACHE_EMPTY_TTL', 0 );     // default 21600s: lifetime cap on empty negative results; 0 disables
-define( 'YAC_OCACHE_DISABLE', true );    // escape hatch: force runtime-only mode
+define( 'YAC_OCACHE_KEY_PREFIX', 'wp' ); // default; give each install its own prefix when sites share one PHP pool
+define( 'YAC_OCACHE_EMPTY_TTL', 21600 ); // default: cap empty negative-cache results at 6 hours; 0 disables
 `
 
 == Frequently Asked Questions ==
