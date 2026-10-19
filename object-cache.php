@@ -48,7 +48,7 @@ if ( ! defined( 'YAC_OCACHE_KEY_PREFIX' ) ) {
 }
 
 if ( ! defined( 'YAC_OCACHE_DROPIN_VERSION' ) ) {
-	define( 'YAC_OCACHE_DROPIN_VERSION', '1.4.0' );
+	define( 'YAC_OCACHE_DROPIN_VERSION', '1.4.1' );
 }
 
 if ( ! defined( 'YAC_OCACHE_EMPTY_TTL' ) ) {

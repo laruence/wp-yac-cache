@@ -4,7 +4,7 @@ Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 7.0
-Stable tag: 1.4.0
+Stable tag: 1.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -97,6 +97,10 @@ Yes. On multisite the Yac instance prefix is `YAC_OCACHE_KEY_PREFIX` + the curre
 Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so core does not rely on it.
 
 == Changelog ==
+
+= 1.4.1 =
+* Added Yac 3.0 compatibility for the cache inspector, including value location metadata; Yac 2.x behavior remains supported.
+* Fixed reported values-pool occupancy so it never exceeds the configured pool size after Yac recycles memory.
 
 = 1.4.0 =
 * Multisite: blogs of one install are now isolated. The Yac instance prefix becomes `YAC_OCACHE_KEY_PREFIX` + the current blog id (ids up to 9999 verbatim, larger ids a 4-hex crc32b digest) and `switch_to_blog()` re-namespaces, so one blog can no longer read another blog's cached entries (the menu/duplication reports on shared namespaces). Single-site behavior is unchanged; upgrading is a one-time cold start.
