@@ -2,9 +2,9 @@
 Contributors: laruence
 Tags: cache, object cache, yac, shared memory, performance
 Requires at least: 5.6
-Tested up to: 7.1
+Tested up to: 7.2
 Requires PHP: 7.0
-Stable tag: 1.4.1
+Stable tag: 1.4.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -96,6 +96,9 @@ Yes. On multisite the Yac instance prefix is `YAC_OCACHE_KEY_PREFIX` + the curre
 Yac cannot delete entries by prefix, so a group flush clears the request-level copy of that group; shared entries then expire via TTL. The plugin reports `flush_group` as unsupported so core does not rely on it.
 
 == Changelog ==
+
+= 1.4.2 =
+* Tested up to WordPress 7.2.
 
 = 1.4.1 =
 * Added Yac 3.0 compatibility for the cache inspector, including value location metadata; Yac 2.x behavior remains supported.
