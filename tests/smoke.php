@@ -257,9 +257,10 @@ if ( $yac_on ) {
 	check( 'add on stored-false key reports failure', wp_cache_add( 'emb_false', 'nope' ) === false );
 	check( 'replace value visible', wp_cache_get( 'emb_false' ) === 'nope' );
 
-	/* a probe with the same instance prefix inspects the shared store
-	   directly (drop-in default prefix: wp:) */
-	$probe  = new Yac( 'wp:' );
+	/* an unprefixed probe inspects the shared store directly and sees full
+	   keys (wp:default:...) on every Yac version; a prefixed one would get
+	   the prefix stripped by Yac 3.0 dump() but not by 2.x */
+	$probe  = new Yac();
 	$by_key = array();
 	foreach ( (array) $probe->dump( -1 ) as $it ) {
 		if ( isset( $it['key'] ) ) {
@@ -321,7 +322,7 @@ if ( $yac_on ) {
 	wp_cache_set( 'ttl-short', array(), '', 120 );
 	$GLOBALS['wp_object_cache'] = new Yac_Ocache_Object_Cache();
 
-	$probe  = new Yac( 'wp:' );
+	$probe  = new Yac();
 	$by_key = array();
 	$pages  = ( defined( 'YAC_VERSION' ) && version_compare( YAC_VERSION, '2.4.0', '>=' ) );
 	foreach ( (array) $probe->dump( $pages ? 1000 : -1 ) as $it ) {
